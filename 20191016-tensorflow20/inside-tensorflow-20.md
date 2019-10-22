@@ -15,6 +15,37 @@ From [here](https://github.com/tensorflow/tensorflow/blob/v2.0.0/tensorflow/pyth
 
 `func_graph_from_py_func` is where the [defun magic](https://github.com/tensorflow/tensorflow/blob/v2.0.0/tensorflow/python/framework/func_graph.py#L915) happens.
 
+## Eager mode
+
+
+Virtual devices can be simulated for local execution using the following snippet:
+
+```python
+tf.config.set_soft_device_placement(False)
+
+virtual_devices = [
+    tf_config.experimental.VirtualDeviceConfiguration()
+    for _ in player_names
+]
+
+tf_config.experimental.set_virtual_device_configuration(
+    tf_config.experimental.list_physical_devices('CPU')[0],
+    virtual_devices)
+```
+
+or for remote execution:
+
+```python
+tf.config.set_soft_device_placement(False)
+
+cluster = tf.train.ClusterSpec({self._job_name: self.hosts})
+
+tf.config.experimental_connect_to_cluster(cluster)
+```
+
+In either case, TensorFlow will take care of remotely executing 
+
+
 ## `tf.function`
 
 To get graph def from function:
@@ -22,6 +53,35 @@ To get graph def from function:
 graph_def = f.get_concrete_function().graph.as_graph_def()
 
 ## Variables
+
+When a function is decorated with tf.function decorator the function is automatically traced and can end up being called more than once. For this reason, variables must be proven not be initialized more than once. TensorFlow documentation recommends that you either create the variable outside of the function or wrap the variable in a class which can store the initialization of the Variable. Following example taken from here.
+
+Create variable outside of function:
+
+```python
+v = tf.Variable(1.0)
+
+@tf.function
+def f(x):
+  return v.assign_add(x)
+```
+
+Wrap variable in a class:
+
+```python
+class C: pass
+obj = C(); obj.v = None
+
+@tf.function
+def g(x):
+  if obj.v is None:
+    obj.v = tf.Variable(1.0)
+  return obj.v.assign_add(x)
+```
+
+These same principles can be applied when creating Keras models or optimizers inside of a `tf.function`.
+
+### New Variable subclasses
 
 There are several new [variable](https://github.com/tensorflow/tensorflow/blob/v2.0.0/tensorflow/python/ops/variables.py) types and a new notions
 
