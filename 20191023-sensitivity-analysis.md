@@ -34,14 +34,17 @@ To be expanded:
 
 For secure aggregation for federated learning we obtain:
 
-1) Model weights with type `PlaintextTensor(None)`.
+0) Model weights with type `PlaintextTensor({mo})`.
+1) Model weights with type `PlaintextTensor(None)` after application of `broaden(None)`; this expresses the policy that it is okay for anyone to learn the model weights.
 2) Local data with type `PlaintextTensor({do1})`, ..., `PlaintextTensor({doN})`.
 3) Local gradients with type `PlaintextTensor({do1})`, ..., `PlaintextTensor({doN})` (after subtyping the weights).
 4) Local encryptions with type `EncryptedTensor({do1})`, ..., `EncryptedTensor({doN})`.
 5) Central encryptions with type `EncryptedTensor({})`, ..., `EncryptedTensor({})` (after subtyping).
 6) Central encryption of aggregation with type `EncryptedTensor({})`.
-7) Central encryption of aggregation with type `EncryptedTensor({mo})` after application of `broaden({mo})`; note that this is expressing the policy that it is okay for the model owner to learn aggregated gradients.
+7) Central encryption of aggregation with type `EncryptedTensor({mo})` after application of `broaden({mo})`; this expresses the policy that it is okay for the model owner to learn aggregated gradients.
 8) Plaintext aggregated gradient of type `PlaintextTensor({mo})` on the model owner.
+
+Note that there is no check for transitive broadening in the sense that the aggregated gradients are first broadened to `{mo}` and then indirectly to `None` later as part of the updated model weights. Likewise, we are not capturing who an malicious player might share values with. Instead, this analysis is only meant to help users catch bugs in their programming.
 
 ### Private Prediction Example
 
