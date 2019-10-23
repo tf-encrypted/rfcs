@@ -15,6 +15,10 @@ From [here](https://github.com/tensorflow/tensorflow/blob/v2.0.0/tensorflow/pyth
 
 `func_graph_from_py_func` is where the [defun magic](https://github.com/tensorflow/tensorflow/blob/v2.0.0/tensorflow/python/framework/func_graph.py#L915) happens.
 
+## Dense-like Tensors
+
+Enables printing custom tensors: https://github.com/tensorflow/tensorflow/blob/1cf0898dd4331baf93fe77205550f2c2e6c90ee5/tensorflow/python/framework/ops.py#L202
+
 ## Eager mode
 
 
