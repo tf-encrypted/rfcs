@@ -35,9 +35,9 @@ To be expanded:
 For secure aggregation for federated learning we obtain:
 
 1) Model weights with type `PlaintextTensor(None)`.
-2) Local data with type `PlaintextTensor(do1)`, ..., `PlaintextTensor(doN)`.
-3) Local gradients with type `PlaintextTensor(do1)`, ..., `PlaintextTensor(doN)` (after subtyping the weights).
-4) Local encryptions with type `EncryptedTensor(do1)`, ..., `EncryptedTensor(doN)`.
+2) Local data with type `PlaintextTensor({do1})`, ..., `PlaintextTensor({doN})`.
+3) Local gradients with type `PlaintextTensor({do1})`, ..., `PlaintextTensor({doN})` (after subtyping the weights).
+4) Local encryptions with type `EncryptedTensor({do1})`, ..., `EncryptedTensor({doN})`.
 5) Central encryptions with type `EncryptedTensor({})`, ..., `EncryptedTensor({})` (after subtyping).
 6) Central encryption of aggregation with type `EncryptedTensor({})`.
 7) Central encryption of aggregation with type `EncryptedTensor({mo})` after application of `broaden({mo})`; note that this is expressing the policy that it is okay for the model owner to learn aggregated gradients.
