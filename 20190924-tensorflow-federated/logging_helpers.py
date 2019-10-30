@@ -174,18 +174,18 @@ def monkey_patch_context(context):
     )
 
   def ingest(val, type_spec):
-    print(prefix(context), "ingest", val, type_spec)
+    print(prefix(context), "ingest call", val, type_spec)
     res = context._real_ingest(val, type_spec)
-    print(prefix(context), "ingest_result", res)
+    print(prefix(context), "ingest retr", res)
     return res
 
   context._real_ingest = context.ingest
   context.ingest = ingest
 
   def invoke(comp, arg):
-    print(prefix(context), "invoke", comp, arg)
+    print(prefix(context), "invoke call", comp, arg)
     res = context._real_invoke(comp, arg)
-    print(prefix(context), "invoke_result", res)
+    print(prefix(context), "invoke retr", res)
     return res
 
   context._real_invoke = context.invoke
@@ -266,7 +266,7 @@ for ty in [
   register_formatting_strategy(ty, lambda x: "<{}>".format(x))
 
 register_formatting_strategy(float, lambda x: "<{} : float>".format(x))
-register_formatting_strategy(type(None), lambda _: "<->")
+register_formatting_strategy(type(None), lambda _: "-")
 
 register_formatting_strategy(tf_EagerTensor,
     lambda x: "<{} @{}>".format(type(x).__name__, id(x)))

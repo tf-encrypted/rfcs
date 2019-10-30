@@ -1,11 +1,6 @@
 import tensorflow as tf
 import tensorflow_federated as tff
 
-from tensorflow_federated.python.core import framework
-from tensorflow_federated.python.core.impl.eager_executor import EagerExecutor
-from tensorflow_federated.python.core.impl.federated_executor import FederatedExecutor
-from tensorflow_federated.python.core.impl.lambda_executor import LambdaExecutor
-
 import logging_helpers
 import custom_executor_stacks
 
