@@ -8,116 +8,231 @@
 
 ## Objective
 
-This document describes an integration between TF Encrypted (TFE) and TensorFlow Federated (TFF), with the former providing runtime secure computation services for the latter. In particular, the focus is on using TFE as a sub-component for secure aggregation under the following conditions:
+This document describes an integration between TF Encrypted (TFE) and TensorFlow Federated (TFF), with the former providing runtime secure computation services for the latter. It is being developed with the following design goals in mind:
 
-- aggregation performed by distinct set of players or by the clients themselves;
-- using various secure computation technique including enclaves, MPC, and HE;
-- using specialized protocols such as [BIK+'17](https://eprint.iacr.org/2017/281) or [DPP'17](https://eprint.iacr.org/2017/643);
-- using real-world infrastructure such as cloud hosted database for storing intermediate messages ("bulletin boards");
-- practical production deployment;
-- good support for experimentation.
+- aggregation protocols may involve external players without TFF placements;
+- aggregation protocols may use a variety of secure computation techniques, including enclaves, MPC, and HE;
+- the approach should target both easy experimentation as well as practical production deployment.
 
-This proposal and its understanding of TFF is based on [release 0.9.0](https://github.com/tensorflow/federated/releases/tag/v0.9.0). Please see [Inside TensorFlow Federated](./inside-tensorflow-federated.md) for more background information.
+The proposed design is based on [TFF 0.9.0](https://github.com/tensorflow/federated/releases/tag/v0.9.0); please see [Inside TensorFlow Federated](./inside-tensorflow-federated.md) for more background information.
 
 ## Motivation
 
-Secure aggregation has been part of the privacy answer in federated learning from early on, and remains an open area for experimentation as no single solution fits all environments. For example, secure aggregation protocols optimized for a large group of volatile Internet users is vastly different from protocols optimized for a small set of reliable servers running in a cluster.
-
-This proposal takes a modular approach to the above need, suggesting the use of TFF for designing federated algorithms while using TFE for designing secure aggregation protocols. This is motivated by the fact that the latter is a framework tailored for experimenting and analyzing secure computation.
+Secure aggregation has been part of the privacy answer in federated learning from early on, and remains an open area for experimentation as no single solution is a perfect fit for all environments. For example, secure aggregation protocols optimized for a large group of volatile Internet users is vastly different from protocols optimized for a small set of reliable servers running in a cluster. This proposal addresses this need in a modular approach, essentially suggesting the use of TFF for designing federated algorithms while using TFE for designing secure aggregation protocols.
 
 ## Design Proposal
 
-The proposed design introduces custom executors similar to the built-in `FederatedExecutor`. They implement encrypted versions of (supported) intrinsic functions (blocking unsupported) and forwards other commands to the next executor in the hierarchy. As such, the use of secure aggregation protocols remains opaque from the perspective of the user designing federated algorithms using the TFF glue language.
+The design introduces custom server executors similar to the `FederatedExecutor` shipping with TFF. They implement encrypted versions of (supported) intrinsic functions (blocking unsupported) and forwards other commands to the next executor in the hierarchy. From the perspective of the user designing federated algorithms using the TFF glue language, this means that the use of secure aggregation protocols remains opaque.
 
-### Specialized Encrypted Executors
-
-We propose implementations of several specific secure aggregation protocols, using TFE for its set of cryptographic primitives. These are easy to use and can be fully optimized. For instance, a simple protocol based on Paillier encryption (see below for details) can be used as follows.
-
-```python
-import tensorflow_federated as tff
-
-# define federated algorithm
-@tff.federated_computation
-def my_computation(xs):
-  return tff.federated_mean(xs)
-
-# create executors for use below
-from tf_encrypted.integrations import federated as tfe_federated
-builtin_executor = tff.framework.create_local_executor(4)
-paillier_executor = tfe_federated.create_paillier_executor(4)
-
-# execute using built-in plaintext aggregation
-tff.framework.set_default_executor(builtin_executor)
-my_computation([1., 2., 3., 4.]))
-
-# execute using secure aggregation based on Paillier encryption
-tff.framework.set_default_executor(paillier_executor)
-my_computation([1., 2., 3., 4.]))
-```
-
-Secure channels between the involved parties are implemented using 
-
-### General Encrypted Executor
-
-Implementing and extending the specialized executors can be somewhat involved, so to address the need for experimentation we also propose a programmable executor parameterized by an encrypted computation expressed in the high-level language of TFE. This additionally allows for reasoning about protocols using the automated security analysis tools built into TFE.
-
-```python
-import tensorflow_federated as tff
-import tf_encrypted as tfe
-
-server = tfe.Player('server')
-aggregator = tfe.Player('aggregator')
-
-@tfe.computation(
-    players={server, aggregator},
-    input_signature={
-      'xs': List<tfe.PlaintextTensor>
-    },
-    output_signature=[
-      tfe.PlaintextTensor.with_confidentiality(server)
-    ]
-)
-def secure_mean(xs):
-
-  protocol = tfe.protocols.Paillier(
-      key_holder={server},
-      default_computer={aggregator})
-
-  with protocol:
-
-    # encrypt inputs at their current placement
-    def encrypt(x):
-      with x.placement:
-        return tfe.encrypt(x)
-    cs = [encrypt(x) for x in xs]
-
-    # compute mean
-    c = tfe.add_n(cs) / 2
-
-    # mark output safe for server
-    c = tfe.allow(c, {server})
-
-    # decrypt output
-    with server:
-      y = tfe.decrypt(c)
-
-    # return reference to output
-    return y
-```
-
-```python
-# create executors for use below
-from tf_encrypted.integrations import federated as tfe_federated
-secure_executor = tfe_federated.create_secure_executor(secure_mean, 4)
-
-# execute using secure aggregation based on Paillier encryption
-tff.framework.set_default_executor(secure_executor)
-my_computation([1., 2., 3., 4.]))
-```
+All protocols assume the existing of secure and authenticated channels between players,¨ which may either be offered directly by the runtime platform or implemented using TFE primitives. These may be indirect and for instance store all (encrypted) messages in a public database.
 
 A one-time installation of TFE on the clients is required in order for the needed cryptographic primitives to be available. Beyond that clients only use built-in executors, requiring no code changes between experimentation and for deployment.
 
-### Session Identifiers
+```python
+# federated algorithm used in the running example
+@tff.federated_computation
+def my_computation(xs):
+  return tff.federated_mean(xs)
+```
+
+```python
+# create built-in executor
+executor = tff.framework.create_local_executor(4)
+```
+
+```python
+# execute using specific executor
+tff.framework.set_default_executor(executor)
+
+my_computation([1., 2., 3., 4.]))
+```
+
+### Specialized Encrypted Executors
+
+We propose several easy-to-use executors for specific secure aggregation protocols: based on Paillier encryption with an external key holder, on additive secret sharing among the clients, and on an enclave hosted on the server. These can be implemented using the cryptographic primitives built into TFE and may be employed as follows:
+
+```python
+from tf_encrypted.integrations import federated as tfe_federated
+
+# create Paillier-based executor
+executor = tfe_federated.create_paillier_executor(4)
+```
+
+### General Encrypted Executor
+
+The above specialized executors are not intended for customization, so to address the need for experimentation we also propose a programmable executor parameterized by an encrypted computation (or program) expressed in the high-level language of TFE.
+
+```python
+from tensorflow_federated.python.core.impl.compiler import FEDERATED_MEAN
+from tensorflow_federated.python.core.impl.compiler import FEDERATED_SUM
+from tf_encrypted.integrations import federated as tfe_federated
+
+# create custom executor from encrypted computations
+executor = tfe_federated.create_custom_executor(
+    supported_aggregations={
+        FEDERATED_MEAN.uri: secure_mean,
+        FEDERATED_SUM.uri: secure_sum,
+    },
+    num_clients=4)
+```
+
+The exact language for expressing encrypted computation is a work in progress but may be along the lines of the following:
+
+```python
+# define symbolic players
+server = tfe.Player('server')
+key_holder = tfe.Player('key_holder')
+
+# define the (abstract) encrypted computation;
+# this is where we focus on *what* is computed
+# and the desired security properties
+@tfe.computation(
+    input_signature={
+        # we expect plaintext inputs, but cannot say
+        # much else yet since the corresponding play-
+        # ers will remain unknown until execute time
+        'xs': List<tfe.PlaintextTensor>
+    },
+    output_signature=[
+        # we expect a plaintext result which must be
+        # known only by the server
+        tfe.PlaintextTensor.with_secrecy({server})
+    ]
+)
+def secure_aggregation(aggr_fn, xs):
+  # encrypt inputs on their current devices; these
+  # will be known when a concrete computation is
+  # derived at runtime
+  cs = [tfe.encrypt(x) for x in xs]
+
+  # compute aggregation on default compute player;
+  # due to the protocol picked later this will
+  # concretely happen on the server
+  d = aggr_fn(cs)
+
+  # allow the server to learn the result; this is
+  # checkable at compile-time and runtime but can
+  # be configured to be a runtime no-op
+  d = tfe.allow(d, {server})
+
+  # decrypt result for server; due to the protocol
+  # picked later this will concretely happen via
+  # the key holder, but masked so that the server
+  # is the only player that learns the plaintext
+  with server:
+    y = tfe.decrypt(d)
+
+  # return (reference to) result
+  return y
+
+# tfe.function is like tf.function but supporting TFE
+# custom tensors: it represents a differentiable ope-
+# ration, indifferent to whether or not it is applied
+# to encrypted values, but expressed using the TFE API
+# to support both; in the future we may support using
+# the TF API and automatically convert to TFE operati-
+# ons; `aggr_fn` is not require to be a tfe.function,
+# but tfe.computation supports it
+@tfe.function
+def mean(cs):
+  return tfe.add_n(cs) / len(cs)
+```
+
+```python
+# set up the concrete protocol that we want to use
+paillier = tfe.protocols.Paillier(
+    key_holder=key_holder,
+    default_compute_player=server)
+
+# combine computation with protocol; this allows us to
+# derive concrete computations but is here done lazily
+# since the executor is the only place where input `xs`
+# is concretely known, including its cardinality; the
+# focus is on *how* the computation happens, and it is
+# finally clear that it is encrypted; when we derive
+# concrete computations we can check that the chosen
+# protocol satisfies the security requirements (which
+# would not have been the case if we had used a plain-
+# text protocol instead)
+
+secure_mean = functools.partial(secure_aggregation,
+    protocol=paillier, aggr_fn=mean)
+
+secure_sum = functools.partial(secure_aggregation,
+    protocol=paillier, aggr_fn=tfe.add_n)
+```
+
+```python
+from tf_encrypted.networking import BulletinBoardStrategy
+
+class CustomExecutor(Executor):
+
+  # ...
+
+  def _compute_federated_mean(self, xs):
+    # assume correspondence between `xs` and clients;
+    # create tfe.Players accordingly
+    player_client_map = {
+        tfe.Player('client-%d' % i): client
+        for i, client in enumerate(self._client_executors)
+    }
+    # derive concrete computation for `xs`; this is
+    # essentially a graph similar to a TF graph but
+    # with operations annotated with players, proto-
+    # cols, secrecy requirements, etc.
+    concrete_comp = self._get_concrete_computation(
+        self._secure_mean, xs, player_client_map.keys())
+    # compile the concrete computation to use the BB
+    # networking strategy; this will result in a se-
+    # quence of ordinary TF graphs to be executed in
+    # order on the corresponding players
+    networking = BulletinBoardStrategy()
+    execution_plan = networking.compile(concrete_comp)
+    # run the execution plan
+    return self._run_execution_plan(execution_plan)
+
+  def _get_concrete_computation(self, comp, inputs, players):
+    # compile signature from xs
+    input_signature = [
+        tfe.TensorSpec(
+            base=PlaintextTensor,
+            dtype=x.dtype,
+            shape=x.shape,
+            location=player,
+            secrecy={player})
+        for x, player in zip(inputs, players)
+    ]
+    # we can finally derive concrete computation
+    return comp.get_concrete_computation(
+        input_signature={'xs': input_signature})
+
+  def _run_execution_plan(self, player_client_map, plan):
+    # ...
+```
+
+```python
+# equivalent ways of defining tensor requirement;
+# from this is follows that every tfe.Tensor type
+# can also be used as a tfe.TensorSpec
+
+# - TensorFlow style
+tfe.TensorSpec(
+    base=tfe.PlaintextTensor,
+    dtype=dtype,
+    shape=shape,
+    location=location,
+    secrecy=secrecy)
+
+# - slightly more object-oriented
+tfe.PlaintextTensor \
+    .with_dtype(dtype) \
+    .with_shape(shape) \
+    .with_location(player) \
+    .with_secrecy(player)
+```
+
+
+As detailed below, the executor will essentially compile such computations into a set of TensorFlow graphs and a plan for when and where they should be executed. Note that `tfe.allow` is a no-op at runtime yet enables automated reasoning about secrecy.
 
 ### Secure Channels
 
