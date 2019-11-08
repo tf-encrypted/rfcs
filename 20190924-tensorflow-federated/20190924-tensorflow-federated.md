@@ -130,9 +130,7 @@ def secure_aggregation(aggr_fn, xs):
 # ration, indifferent to whether or not it is applied
 # to encrypted values, but expressed using the TFE API
 # to support both; in the future we may support using
-# the TF API and automatically convert to TFE operati-
-# ons; `aggr_fn` is not require to be a tfe.function,
-# but tfe.computation supports it
+# the TF API and automatically convert operations
 @tfe.function
 def mean(cs):
   return tfe.add_n(cs) / len(cs)
@@ -153,7 +151,8 @@ paillier = tfe.protocols.Paillier(
 # concrete computations we can check that the chosen
 # protocol satisfies the security requirements (which
 # would not have been the case if we had used a plain-
-# text protocol instead)
+# text protocol instead); `aggr_fn` is not require to
+# be a tfe.function, but tfe.computation supports it
 
 secure_mean = functools.partial(secure_aggregation,
     protocol=paillier, aggr_fn=mean)
@@ -172,27 +171,34 @@ class CustomExecutor(Executor):
   def _compute_federated_mean(self, xs):
     # assume correspondence between `xs` and clients;
     # create tfe.Players accordingly
-    player_client_map = {
+    player_executor_map = {
         tfe.Player('client-%d' % i): client
         for i, client in enumerate(self._client_executors)
     }
+
     # derive concrete computation for `xs`; this is
     # essentially a graph similar to a TF graph but
     # with operations annotated with players, proto-
     # cols, secrecy requirements, etc.
     concrete_comp = self._get_concrete_computation(
-        self._secure_mean, xs, player_client_map.keys())
+        self._secure_mean, xs, player_executor_map.keys())
+
     # compile the concrete computation to use the BB
     # networking strategy; this will result in a se-
     # quence of ordinary TF graphs to be executed in
     # order on the corresponding players
     networking = BulletinBoardStrategy()
     execution_plan = networking.compile(concrete_comp)
-    # run the execution plan
-    return self._run_execution_plan(execution_plan)
+
+    # add remaining executors
+    player_executor_map['key_holder'] = self._keyholder_executor
+    player_executor_map['server'] = self._local_executor
+
+    # return result of running the plan
+    return self._run_execution_plan(player_executor_map, execution_plan)
 
   def _get_concrete_computation(self, comp, inputs, players):
-    # compile signature from xs
+    # compile signature from inputs and players
     input_signature = [
         tfe.TensorSpec(
             base=PlaintextTensor,
@@ -206,7 +212,16 @@ class CustomExecutor(Executor):
     return comp.get_concrete_computation(
         input_signature={'xs': input_signature})
 
-  def _run_execution_plan(self, player_client_map, plan):
+  def _run_execution_plan(self, player_executor_map, plan):
+    for step in plan:
+      executor = player_executor_map[step.player]
+      # pre-routing: move inputs from server to executor
+      local_inputs = [move(x, executor) for x in step.inputs]
+      # execute graph locally
+      local_outputs = self._run_graph(step.graph, local_inputs, executor)
+      # post-routing: move outputs from executor to server
+      outputs = [move(y, server) for y in local_outputs]
+
     # ...
 ```
 
@@ -241,6 +256,12 @@ Secure aggregation protocols often require communication patterns outside of tho
 In some settings it is however interesting to instead allow direct communication between the parties using, for instance in high-performance cluster computations. This remain a work-in-progress but would likely happen via a custom `ConnectedEagerExecutor` that can establish secure connections through e.g. gRPC over TLS.
 
 ### External Services
+
+### Implementation Roadmap
+
+1. Implement specific executors;
+2. Implement generic executor;
+3. Re-implement (select) specific executors as instances of generic.
 
 ## Detailed Design Proposal
 
