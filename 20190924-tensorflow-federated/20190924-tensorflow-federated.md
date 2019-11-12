@@ -57,7 +57,7 @@ Among these specialized executors we below outline three based on respectively:
 - additive secret sharing among the clients;
 - server-hosted enclave.
 
-### General Encrypted Executor
+### Generic Encrypted Executor
 
 The above specialized executors are not intended for customization, so to address the need for experimentation we also propose a programmable executor parameterized by an encrypted computation (or program) expressed in the high-level language of TFE.
 
@@ -181,8 +181,8 @@ enclaves
 We propose the following implementation phases:
 
 1. Implement specific executors and required subcomponents such as secure channels;
-2. Implement general executor and required subcomponnets such as compilers;
-3. Re-implement (select) specific executors as instances of the general.
+2. Implement generic executor and required subcomponnets such as compilers;
+3. Re-implement (select) specific executors as instances of the generic.
 
 ## Detailed Design Proposal
 
@@ -303,7 +303,7 @@ Obstacles:
 - manage associated state.
 -->
 
-### Implementing the Specific Encrypted Execytor using Secret Sharing and Keyed PRGs
+### Implementing the Specific Encrypted Executor using Secret Sharing and Keyed PRGs
 
 *(work in progress)*
 
@@ -374,7 +374,7 @@ Possible issues that need to be addressed:
 
 -->
 
-### Implementing the General Encrypted Executor
+### Implementing the Generic Encrypted Executor
 
 We here give more details on how the custom executor may be implemented. Given (abstract) computations it maps players to known executors and orchestrates TensorFlow computations on them. We concretely focus on `compute_federated_mean`. Note that `create_custom_executor` is responsible for setting up auxiliary executors needed by the encrypted computations when creating the executor stack, and passing these to `CustomExecutor` below.
 
