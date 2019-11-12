@@ -4,7 +4,7 @@
 :-------------- |:----------------------------------------------------
 | **Author(s)** | Morten Dahl |
 | **Sponsor**   | |
-| **Updated**   | 2019-10-31 |
+| **Updated**   | 2019-09-24 |
 
 ## Objective
 
@@ -22,41 +22,40 @@ Secure aggregation has been part of the privacy answer in federated learning fro
 
 ## Design Proposal
 
-The design introduces custom server executors similar to the `FederatedExecutor` shipping with TFF. They implement encrypted versions of (supported) intrinsic functions (blocking unsupported) and forwards other commands to the next executor in the hierarchy. From the perspective of the user designing federated algorithms using the TFF glue language, this means that the use of secure aggregation protocols remains opaque.
-
-All protocols assume the existing of secure and authenticated channels between players,¨ which may either be offered directly by the runtime platform or implemented using TFE primitives. These may be indirect and for instance store all (encrypted) messages in a public database.
-
-A one-time installation of TFE on the clients is required in order for the needed cryptographic primitives to be available. Beyond that clients only use built-in executors, requiring no code changes between experimentation and for deployment.
+The design introduces custom server executors similar to the `FederatedExecutor` shipping with TFF. They implement encrypted versions of supported intrinsic functions, blocks the unsupported, and forwards other commands to the next executor in the hierarchy. This means that the use of secure aggregation protocols remains opaque to the user designing federated algorithms using the TFF glue language. For examples, the only changes required to run the following algorithm securely is to instead create and use one of the executors outlined in this document:
 
 ```python
-# federated algorithm used in the running example
+# simple federated algorithm
 @tff.federated_computation
 def my_computation(xs):
   return tff.federated_mean(xs)
-```
 
-```python
 # create built-in executor
-executor = tff.framework.create_local_executor(4)
-```
+executor = tff.framework.create_local_executor(5)
 
-```python
-# execute using specific executor
+# execute using chosen executor
 tff.framework.set_default_executor(executor)
-
-my_computation([1., 2., 3., 4.]))
+my_computation([1., 2., 3., 4., 5.]))
 ```
+
+A one-time installation of TFE on the clients is required in order for the needed cryptographic primitives to be available. Beyond that clients only use built-in executors, requiring no code changes between experiments and as part of deployment. We assume the existing of secure and authenticated channels between some of the parties, which may either be offered directly by the runtime platform or implemented using TFE primitives.
 
 ### Specialized Encrypted Executors
 
-We propose several easy-to-use executors for specific secure aggregation protocols: based on Paillier encryption with an external key holder, on additive secret sharing among the clients, and on an enclave hosted on the server. These can be implemented using the cryptographic primitives built into TFE and may be employed as follows:
+We propose several easy-to-use executors for specific secure aggregation protocols that can be implemented using the cryptographic primitives built into TFE and experimented with locally as follows:
 
 ```python
 from tf_encrypted.integrations import federated as tfe_federated
 
 # create Paillier-based executor
-executor = tfe_federated.create_paillier_executor(4)
+executor = tfe_federated.create_paillier_executor(5)
 ```
+
+Among these specialized executors we below outline three based on respectively:
+
+- Paillier encryption with external key holder;
+- additive secret sharing among the clients;
+- server-hosted enclave.
 
 ### General Encrypted Executor
 
@@ -73,19 +72,33 @@ executor = tfe_federated.create_custom_executor(
         FEDERATED_MEAN.uri: secure_mean,
         FEDERATED_SUM.uri: secure_sum,
     },
-    num_clients=4)
+    num_clients=5)
 ```
 
-The exact language for expressing encrypted computation is a work in progress but may be along the lines of the following:
+The exact language for expressing the `secure_mean` and `secure_sum` encrypted computation remains a work in progress but may be along the lines of the following:
 
 ```python
-# define symbolic players
-server = tfe.Player('server')
-key_holder = tfe.Player('key_holder')
+# define *what* we wish to compute; tfe.function is
+# like tf.function but supporting TFE custom tensors:
+# it represents a differentiable operation, indiffe-
+# rent to whether or not it is applied to encrypted
+# values, but expressed using the TFE API to support
+# both; in the future we may support the TF API and
+# automatically convert operations based on the graph
+@tfe.function
+def mean(cs):
+  return tfe.add_n(cs) / len(cs)
 
-# define the (abstract) encrypted computation;
-# this is where we focus on *what* is computed
-# and the desired security properties
+# define the symbolic players among who the computa-
+# tion takes place; their identity is determined by
+# the given name entirely
+server = tfe.Player(name='server')
+key_holder = tfe.Player(name='key_holder')
+
+# define *where* the computation should take place,
+# and desired security properties it must satisfy;
+# the resulting computation is abstract and made
+# concrete below by combining it with a protocol
 @tfe.computation(
     input_signature={
         # we expect plaintext inputs, but cannot say
@@ -105,9 +118,11 @@ def secure_aggregation(aggr_fn, xs):
   # derived at runtime
   cs = [tfe.encrypt(x) for x in xs]
 
-  # compute aggregation on default compute player;
-  # due to the protocol picked later this will
-  # concretely happen on the server
+  # compute aggregation on default compute player
+  # determined by the protocol; this will be the
+  # server due to the concrete protocol chosen;
+  # `aggr_fn` is not require to be a tfe.function,
+  # but tfe.computation supports it
   d = aggr_fn(cs)
 
   # allow the server to learn the result; this is
@@ -116,28 +131,16 @@ def secure_aggregation(aggr_fn, xs):
   d = tfe.allow(d, {server})
 
   # decrypt result for server; due to the protocol
-  # picked later this will concretely happen via
-  # the key holder, but masked so that the server
-  # is the only player that learns the plaintext
+  # this will concretely happen via the key holder,
+  # but masked so that only the server learns it
   with server:
     y = tfe.decrypt(d)
 
   # return (reference to) result
   return y
 
-# tfe.function is like tf.function but supporting TFE
-# custom tensors: it represents a differentiable ope-
-# ration, indifferent to whether or not it is applied
-# to encrypted values, but expressed using the TFE API
-# to support both; in the future we may support using
-# the TF API and automatically convert operations
-@tfe.function
-def mean(cs):
-  return tfe.add_n(cs) / len(cs)
-```
-
-```python
-# set up the concrete protocol that we want to use
+# set up the concrete protocol that we want to use;
+# focus is on *how* the computation takes place
 paillier = tfe.protocols.Paillier(
     key_holder=key_holder,
     default_compute_player=server)
@@ -145,14 +148,11 @@ paillier = tfe.protocols.Paillier(
 # combine computation with protocol; this allows us to
 # derive concrete computations but is here done lazily
 # since the executor is the only place where input `xs`
-# is concretely known, including its cardinality; the
-# focus is on *how* the computation happens, and it is
-# finally clear that it is encrypted; when we derive
+# is concretely known, including its cardinality; for
 # concrete computations we can check that the chosen
-# protocol satisfies the security requirements (which
-# would not have been the case if we had used a plain-
-# text protocol instead); `aggr_fn` is not require to
-# be a tfe.function, but tfe.computation supports it
+# security requirements are satisfied, which would not
+# have been the case here if we had used a plaintext
+# protocol instead
 
 secure_mean = functools.partial(secure_aggregation,
     protocol=paillier, aggr_fn=mean)
@@ -161,113 +161,34 @@ secure_sum = functools.partial(secure_aggregation,
     protocol=paillier, aggr_fn=tfe.add_n)
 ```
 
-```python
-from tf_encrypted.networking import BulletinBoardStrategy
+As detailed later, to execute a concrete computation the executor compiles it into a set of TFE program steps together with a plan for when and by which player they should be executed. These steps are essentially local TensorFlow graphs that can be executed by the built-in `EagerExecutor`.
 
-class CustomExecutor(Executor):
+### Networking and Secure Channels
 
-  # ...
+Computation can be excuted using a variaty of networking strategies ...
 
-  def _compute_federated_mean(self, xs):
-    # assume correspondence between `xs` and clients;
-    # create tfe.Players accordingly
-    player_executor_map = {
-        tfe.Player('client-%d' % i): client
-        for i, client in enumerate(self._client_executors)
-    }
+Secure aggregation protocols often require communication patterns outside of those otherwise used in TFF. In particular, secure channels between some of the parties are typically required, allowing one party to send a confidential and/or authenticated message to another. If some form of a trusted PKI is in place then this can in general be realized by routing all message through the server, requiring no changes to the client executors. This can either be achieved via the cryptographic primitives built into TFE or ideally via secure channel functionality built into the TFF runtime platform.
 
-    # derive concrete computation for `xs`; this is
-    # essentially a graph similar to a TF graph but
-    # with operations annotated with players, proto-
-    # cols, secrecy requirements, etc.
-    concrete_comp = self._get_concrete_computation(
-        self._secure_mean, xs, player_executor_map.keys())
+In some settings it is interesting to allow direct communication between the executors, for instance in high-performance cluster computations. This remain a work-in-progress but could happen via e.g. TF custom ops and gRPC over TLS.
 
-    # compile the concrete computation to use the BB
-    # networking strategy; this will result in a se-
-    # quence of ordinary TF graphs to be executed in
-    # order on the corresponding players
-    networking = BulletinBoardStrategy()
-    execution_plan = networking.compile(concrete_comp)
+### Lunching and Using External Services
 
-    # add remaining executors
-    player_executor_map['key_holder'] = self._keyholder_executor
-    player_executor_map['server'] = self._local_executor
-
-    # return result of running the plan
-    return self._run_execution_plan(player_executor_map, execution_plan)
-
-  def _get_concrete_computation(self, comp, inputs, players):
-    # compile signature from inputs and players
-    input_signature = [
-        tfe.TensorSpec(
-            base=PlaintextTensor,
-            dtype=x.dtype,
-            shape=x.shape,
-            location=player,
-            secrecy={player})
-        for x, player in zip(inputs, players)
-    ]
-    # we can finally derive concrete computation
-    return comp.get_concrete_computation(
-        input_signature={'xs': input_signature})
-
-  def _run_execution_plan(self, player_executor_map, plan):
-    for step in plan:
-      executor = player_executor_map[step.player]
-      # pre-routing: move inputs from server to executor
-      local_inputs = [move(x, executor) for x in step.inputs]
-      # execute graph locally
-      local_outputs = self._run_graph(step.graph, local_inputs, executor)
-      # post-routing: move outputs from executor to server
-      outputs = [move(y, server) for y in local_outputs]
-
-    # ...
-```
-
-```python
-# equivalent ways of defining tensor requirement;
-# from this is follows that every tfe.Tensor type
-# can also be used as a tfe.TensorSpec
-
-# - TensorFlow style
-tfe.TensorSpec(
-    base=tfe.PlaintextTensor,
-    dtype=dtype,
-    shape=shape,
-    location=location,
-    secrecy=secrecy)
-
-# - slightly more object-oriented
-tfe.PlaintextTensor \
-    .with_dtype(dtype) \
-    .with_shape(shape) \
-    .with_location(player) \
-    .with_secrecy(player)
-```
-
-
-As detailed below, the executor will essentially compile such computations into a set of TensorFlow graphs and a plan for when and where they should be executed. Note that `tfe.allow` is a no-op at runtime yet enables automated reasoning about secrecy.
-
-### Secure Channels
-
-Secure aggregation protocols often require communication patterns outside of those otherwise used in TFF. In particular, secure channels between some of the parties are typically required, allowing one party to send a confidential and/or authenticated message to another. If a PKI is in place then this can in general be realized by routing all message through the server, requiring no changes to the client executors. This can either be achieved via the cryptographic primitives built into TFE or ideally via secure channel functionality built into TFF.
-
-In some settings it is however interesting to instead allow direct communication between the parties using, for instance in high-performance cluster computations. This remain a work-in-progress but would likely happen via a custom `ConnectedEagerExecutor` that can establish secure connections through e.g. gRPC over TLS.
-
-### External Services
+Either through custom executor offering additional services or via dedicated service available via gRPC/REST.
+enclaves
 
 ### Implementation Roadmap
 
-1. Implement specific executors;
-2. Implement generic executor;
-3. Re-implement (select) specific executors as instances of generic.
+We propose the following implementation phases:
+
+1. Implement specific executors and required subcomponents such as secure channels;
+2. Implement general executor and required subcomponnets such as compilers;
+3. Re-implement (select) specific executors as instances of the general.
 
 ## Detailed Design Proposal
 
 We here detail a few examples of custom executors for secure aggregation.
 
-### Secure Aggregation using Paillier
+### Implementing the Specific Encrypted Executor using Paillier
 
 This example consists of the following parties:
 
@@ -361,7 +282,7 @@ def decrypt_output(raw_keypair, raw_c):
 
 -->
 
-### Secure Aggregation using Enclaves
+### Implementing the Specific Encrypted Executor using Enclaves
 
 *(work in progress)*
 
@@ -382,7 +303,7 @@ Obstacles:
 - manage associated state.
 -->
 
-### Secure Aggregation using Secret Sharing and Keyed PRGs
+### Implementing the Specific Encrypted Execytor using Secret Sharing and Keyed PRGs
 
 *(work in progress)*
 
@@ -453,9 +374,103 @@ Possible issues that need to be addressed:
 
 -->
 
-### Programmable Secure Aggregation
+### Implementing the General Encrypted Executor
 
-*(work in progress)*
+We here give more details on how the custom executor may be implemented. Given (abstract) computations it maps players to known executors and orchestrates TensorFlow computations on them. We concretely focus on `compute_federated_mean`. Note that `create_custom_executor` is responsible for setting up auxiliary executors needed by the encrypted computations when creating the executor stack, and passing these to `CustomExecutor` below.
+
+```python
+from tf_encrypted.networking import BulletinBoardStrategy
+
+class CustomExecutor(Executor):
+
+  # ...
+
+  def compute_federated_mean(self, xs):
+    # assume correspondence between `xs` and clients,
+    # and create tfe.Players accordingly
+    player_executor_map = {
+        tfe.Player('client-%d' % i): client
+        for i, client in enumerate(self._client_executors)
+    }
+
+    # derive concrete computation for `xs`; this is
+    # essentially a graph similar to a TF graph but
+    # with operations annotated with players, proto-
+    # cols, secrecy requirements, etc.
+    concrete_comp = self._get_concrete_computation(
+        self._secure_mean, xs, player_executor_map.keys())
+
+    # add external executors based on input provided
+    # by user along side encrypted computation; con-
+    # cretely, this is where the key holder is added
+    player_executor_map.update(self._secure_mean_player_executor_map)
+
+    # map the server to its local executor
+    player_executor_map['server'] = self._local_executor
+
+    # make sure all players are accounted for
+    assert concrete_comp.players <= player_executor_map.keys()
+
+    # compile the concrete computation to use the BB
+    # networking strategy; this will result in a se-
+    # quence of TFE program steps to be executed in
+    # order on the corresponding players
+    networking = BulletinBoardStrategy()
+    execution_plan = networking.compile(concrete_comp)
+
+    # return result of running the plan
+    return self._run_execution_plan(player_executor_map, execution_plan)
+
+  def _get_concrete_computation(self, comp, inputs, input_players):
+    # compile signature from inputs and players
+    input_signature = [
+        tfe.TensorSpec(
+            base=PlaintextTensor,
+            dtype=x.dtype,
+            shape=x.shape,
+            location=player,
+            secrecy={player})
+        for x, player in zip(inputs, input_players)
+    ]
+    # we can finally derive concrete computation
+    return comp.get_concrete_computation(
+        input_signature={'xs': input_signature})
+
+  def _run_execution_plan(self, player_executor_map, plan):
+    for step in plan:
+      executor = player_executor_map[step.player]
+      # pre-routing: move inputs from server to executor
+      local_inputs = [move(x, executor) for x in step.inputs]
+      # execute graph locally
+      # TODO assert that step is a TF graph
+      local_outputs = self._run_graph(step.graph, local_inputs, executor)
+      # post-routing: move outputs from executor to server
+      outputs = [move(y, server) for y in local_outputs]
+
+    # ...
+```
+
+```python
+# equivalent ways of defining tensor requirement;
+# from this is follows that every tfe.Tensor type
+# can also be used as a tfe.TensorSpec
+
+# - TensorFlow style
+tfe.TensorSpec(
+    base=tfe.PlaintextTensor,
+    dtype=dtype,
+    shape=shape,
+    location=location,
+    secrecy=secrecy)
+
+# - slightly more object-oriented
+tfe.PlaintextTensor \
+    .with_dtype(dtype) \
+    .with_shape(shape) \
+    .with_location(player) \
+    .with_secrecy(player)
+```
+
 
 <!--
 The above specialized executors are easy to use but the general strategy makes for a more involved experimentation process. To that end we also propose a programmable executor 
