@@ -40,7 +40,7 @@ my_computation([1., 2., 3., 4., 5.]))
 
 A one-time installation of TFE on the clients is required in order for the needed cryptographic primitives to be available. Beyond that clients only use built-in executors, requiring no code changes between experiments and as part of deployment. We assume the existing of secure and authenticated channels between some of the parties, which may either be offered directly by the runtime platform or implemented using TFE primitives.
 
-### Specialized Encrypted Executors
+### Specific Encrypted Executors
 
 We propose several easy-to-use executors for specific secure aggregation protocols that can be implemented using the cryptographic primitives built into TFE and experimented with locally as follows:
 
@@ -51,7 +51,7 @@ from tf_encrypted.integrations import federated as tfe_federated
 executor = tfe_federated.create_paillier_executor(5)
 ```
 
-Among these specialized executors we below outline three based on respectively:
+Below we focus on three specific executors based on respectively:
 
 - Paillier encryption with external key holder;
 - additive secret sharing among the clients;
@@ -59,7 +59,7 @@ Among these specialized executors we below outline three based on respectively:
 
 ### Generic Encrypted Executor
 
-The above specialized executors are not intended for customization, so to address the need for experimentation we also propose a programmable executor parameterized by an encrypted computation (or program) expressed in the high-level language of TFE.
+The above specific executors are not intended for customization, so to address the need for experimentation we also propose a programmable executor parameterized by an encrypted computation (or program) expressed in the high-level language of TFE.
 
 ```python
 from tensorflow_federated.python.core.impl.compiler import FEDERATED_MEAN
@@ -94,6 +94,7 @@ def mean(cs):
 # the given name entirely
 server = tfe.Player(name='server')
 key_holder = tfe.Player(name='key_holder')
+aggregator = tfe.Player(name='aggregator')
 
 # define *where* the computation should take place,
 # and desired security properties it must satisfy;
@@ -118,12 +119,13 @@ def secure_aggregation(aggr_fn, xs):
   # derived at runtime
   cs = [tfe.encrypt(x) for x in xs]
 
-  # compute aggregation on default compute player
-  # determined by the protocol; this will be the
-  # server due to the concrete protocol chosen;
+  # compute the aggregation on the aggregator; some
+  # protocols are more picky w.r.t. to this and may
+  # complain when a concrete computation is derived;
   # `aggr_fn` is not require to be a tfe.function,
   # but tfe.computation supports it
-  d = aggr_fn(cs)
+  with aggregator:
+    d = aggr_fn(cs)
 
   # allow the server to learn the result; this is
   # checkable at compile-time and runtime but can
@@ -141,7 +143,7 @@ def secure_aggregation(aggr_fn, xs):
 
 # set up the concrete protocol that we want to use;
 # focus is on *how* the computation takes place
-paillier = tfe.protocols.Paillier(
+protocol = tfe.protocols.Paillier(
     key_holder=key_holder,
     default_compute_player=server)
 
@@ -155,10 +157,10 @@ paillier = tfe.protocols.Paillier(
 # protocol instead
 
 secure_mean = functools.partial(secure_aggregation,
-    protocol=paillier, aggr_fn=mean)
+    protocol=protocol, aggr_fn=mean)
 
 secure_sum = functools.partial(secure_aggregation,
-    protocol=paillier, aggr_fn=tfe.add_n)
+    protocol=protocol, aggr_fn=tfe.add_n)
 ```
 
 As detailed later, to execute a concrete computation the executor compiles it into a set of TFE program steps together with a plan for when and by which player they should be executed. These steps are essentially local TensorFlow graphs that can be executed by the built-in `EagerExecutor`.
@@ -181,28 +183,28 @@ enclaves
 We propose the following implementation phases:
 
 1. Implement specific executors and required subcomponents such as secure channels;
-2. Implement generic executor and required subcomponnets such as compilers;
+2. Implement generic executor and required subcomponents such as compilers;
 3. Re-implement (select) specific executors as instances of the generic.
 
 ## Detailed Design Proposal
 
-We here detail a few examples of custom executors for secure aggregation.
+We here go into further details regarding the implementation of the custom executors.
 
-### Implementing the Specific Encrypted Executor using Paillier
+### Implementing the Paillier Executor
 
 This example consists of the following parties:
 
 - a set of clients providing inputs to the aggregation;
-- the server receiving the aggregated output and holding the decryption key;
-- an aggregator responsible for combining ciphertexts using the homomorphic properties of the encryption scheme.
+- a server combining ciphertexts and receiving the aggregation output;
+- a key holder owning the decryption key.
 
-The aggregator does not have a formal TFF placement but is an `EagerExecutor` e.g. referenced through a `RemoteExecutor` by the custom executor running on the server (similar to the `None` executor used by `FederatedExecutor`). Secure channels from the clients to the aggregator are implemented by routing all messages through the server using the [libsodium](https://github.com/jedisct1/libsodium) operations for sealed boxes exposed through TFE; if desired the identity of clients can be ensured using authenticated encryption instead.
+The key holder does not have a formal TFF placement but can be an `EagerExecutor` referenced through a `RemoteExecutor` by the custom executor running on the server (similar to the `None` executor used by `FederatedExecutor`). Secure channels from the clients to the aggregator are implemented by routing all messages through the server using the [libsodium](https://github.com/jedisct1/libsodium) operations for sealed boxes exposed through TFE; if desired the identity of clients can be verified by using authenticated encryption instead.
 
 The protocol consists of the following steps split into two phases:
 
 - Setup phase (for setup channels):
 
-  1. Generate a sealed boxes keypair on the aggregator;  
+  1. Generate a sealed boxes keypair on the key holder;  
   this can be done using a TF computation calling a TFE primitive.
 
   2. Broadcast the public encryption key to the clients;  
@@ -210,7 +212,7 @@ The protocol consists of the following steps split into two phases:
 
 - Aggregation phase (repeatable for same setup):
 
-  1. Generate a Paillier keypair on the server;  
+  1. Generate a Paillier keypair on the key holder;  
   this can be done using a TF computation calling a TFE primitive.
 
   2. Broadcast the public encryption key to the clients;  
@@ -406,7 +408,14 @@ class CustomExecutor(Executor):
     player_executor_map.update(self._secure_mean_player_executor_map)
 
     # map the server to its local executor
-    player_executor_map['server'] = self._local_executor
+    server = tfe.Player('server')
+    player_executor_map[server] = self._local_executor
+
+    # TODO here we have to be careful not to map several
+    # players to the same executor, since we then loose
+    # TFE's ability to check secrecy properties; instead
+    # we can replace one player with another before exe-
+    # cuting the computations
 
     # make sure all players are accounted for
     assert concrete_comp.players <= player_executor_map.keys()
@@ -451,6 +460,26 @@ class CustomExecutor(Executor):
 ```
 
 ```python
+tfe.TensorSpec(
+    base=tfe.PondTensor,
+    dtype=dtype,
+    shape=shape,
+    protocol=Pond(dtype=dtype, server0, server1),
+    device=pond123,
+    location={server0, server1},
+    secrecy={inputter},
+)
+```
+
+```python
+pond = tfe.protocols.Pond(...)
+with pond.as_protocol():
+  with pond.as_device():
+    y = x * 2
+)
+```
+
+```python
 # equivalent ways of defining tensor requirement;
 # from this is follows that every tfe.Tensor type
 # can also be used as a tfe.TensorSpec
@@ -471,9 +500,18 @@ tfe.PlaintextTensor \
     .with_secrecy(player)
 ```
 
+```python
+
+# set up the concrete protocol that we want to use;
+# focus is on *how* the computation takes place
+protocol = tfe.protocols.Paillier(
+    key_holder=key_holder,
+    default_compute_player=server)
+```
+
 
 <!--
-The above specialized executors are easy to use but the general strategy makes for a more involved experimentation process. To that end we also propose a programmable executor 
+The above specific executors are easy to use but the general strategy makes for a more involved experimentation process. To that end we also propose a programmable executor 
 
 the point is to have operations for eg sealed boxes/authenticated encrypted generated automatically when compiling for bulleting-board networking, allowing the protocol designer to simply assume secure channels. this reduces e.g. the Paillier aggregator to be expressed as follows:
 
