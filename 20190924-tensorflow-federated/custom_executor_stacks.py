@@ -7,6 +7,7 @@ from tensorflow_federated.python.core.impl.lambda_executor import LambdaExecutor
 
 from secure_federated_executor import SecureFederatedExecutor
 
+
 def builtin_executor_stack(num_clients):
 
   def executor_fn(mapping):
