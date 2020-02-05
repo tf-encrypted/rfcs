@@ -8,35 +8,69 @@
 
 ## Objective
 
-This document describes an integration between TF Encrypted (TFE) and TensorFlow Federated (TFF), with the former providing runtime secure computation services for the latter. It is being developed with the following design goals in mind:
+This document describes an integration between TF Encrypted (TFE) and TensorFlow Federated (TFF), with the former providing secure computation functionality for the latter. It is being developed for various environments, including both cross-silo and cross-device federated learning (FL), with the following design goals in mind:
 
-- aggregation protocols may involve external players without TFF placements;
-- aggregation protocols may use a variety of secure computation techniques, including enclaves, MPC, and HE;
-- the approach should target both easy experimentation as well as practical production deployment.
+- the approach should target both easy experimentation and practical production deployment;
+- aggregation protocols may use a variety of secure computation techniques, including MPC and HE;
+- computations may involve external actors without TFF placements, such as partially-trusted servers or enclaves.
 
 The proposed design is based on [TFF 0.9.0](https://github.com/tensorflow/federated/releases/tag/v0.9.0) with additional background information available in [Inside TensorFlow Federated](./inside-tensorflow-federated.md) and [Integration Strategies](./integration-strategies.md).
 
 ## Motivation
 
-Secure aggregation has been part of the privacy answer in federated learning since early on, but remains an open area for experimentation as no single solution is a perfect fit for all environments. For example, secure aggregation protocols optimized for a large group of volatile Internet users is vastly different from protocols optimized for a small set of reliable servers running in a cluster. This proposal addresses this need in a modular approach, essentially suggesting the use of TFF for designing federated algorithms while using TFE for designing secure aggregation protocols.
+Secure aggregation has been part of the privacy answer in federated learning since early on, yet remains an open area for experimentation as no single solution is a perfect fit for all environments. For example, secure aggregation protocols optimized for cross-device FL (eg a large group of volatile mobile devices) are vastly different from a cryptographic perspective than protocols optimized for cross-silo FL (eg a small set of reliable servers running in a cluster).
+
+The design of such protocols require expertise and tools that are mostly orthogonal to what is  currently available in TFF, and this document proposes a modular solution to supporting experimentation and deployment of secure aggregation in TFF, suggesting the use of TFF for designing federated algorithms and TFE for designing secure aggregation protocols.
 
 ## Design Proposal
 
-The design introduces custom server executors similar to the `FederatedExecutor` shipping with TFF. They implement encrypted versions of supported intrinsic functions, blocks the unsupported, and forwards other commands to the next executor in the hierarchy. This means that the use of secure aggregation protocols remains opaque to the user designing federated algorithms using the TFF glue language. For examples, the only changes required to run the following algorithm securely is to instead create and use one of the executors outlined in this document:
+This document introduces custom server executors similar to the `FederatedExecutor` shipping with TFF. They implement encrypted versions of supported intrinsic functions, blocks the unsupported, and forwards unrelated commands to the next executor in the hierarchy. This means that the use of secure aggregation protocols remains opaque to the user designing federated algorithms using the TFF glue language.
+
+Consider the following example:
 
 ```python
-# simple federated algorithm
+# define federated algorithm using TFF glue language
 @tff.federated_computation
 def my_computation(xs):
   return tff.federated_mean(xs)
 
-# create built-in executor
-executor = tff.framework.create_local_executor(5)
-
-# execute using chosen executor
-tff.framework.set_default_executor(executor)
+# execute using default executor stack
 my_computation([1., 2., 3., 4., 5.]))
 ```
+
+The only change needed to instead 
+we instead use one of the executors outlined in the following subsections:
+
+```python
+def secure_executor_stack(num_clients):
+
+  def executor_fn(mapping):
+    del mapping
+
+    def _complete_stack(ex):
+      return \
+          LambdaExecutor(
+          # CachingExecutor(
+          # ConcurrentExecutor(
+          ex
+      )
+
+    def _create_bottom_stack():
+      return _complete_stack(EagerExecutor())
+
+    executor_dict = {
+        tff.CLIENTS: [_create_bottom_stack() for _ in range(num_clients)],
+        tff.SERVER: _create_bottom_stack(),
+        None: _create_bottom_stack(),
+    }
+    return _complete_stack(SecureFederatedExecutor(FederatedExecutor(executor_dict)))
+
+  return executor_fn
+
+executor_fn = tff.framework.create_local_executor(5)
+tff.framework.set_default_executor(executor_fn)
+```
+
 
 A one-time installation of TFE on the clients is required in order for the needed cryptographic primitives to be available. Beyond that clients only use built-in executors, requiring no code changes between experiments and as part of deployment. We assume the existing of secure and authenticated channels between some of the participants; these may be implemented using TFE primitives if not offered by the runtime platform.
 
@@ -66,6 +100,7 @@ The above specific executors are not intended for customization, so to address t
 ```python
 from tensorflow_federated.python.core.impl.compiler import FEDERATED_MEAN
 from tensorflow_federated.python.core.impl.compiler import FEDERATED_SUM
+
 from tf_encrypted.integrations import federated as tfe_federated
 
 # define symbolic player owning the output of the
@@ -163,7 +198,7 @@ def secure_aggregation(aggr_fn, xs):
   # fault device); with the Paillier protocol this
   # will concretely happen via the key holder, but
   # masked by the output receiver
-  with output_receiver:
+  with output_receiver.default_device():
     y = tfe.decrypt(d)
 
   # return (reference to) result
@@ -187,97 +222,97 @@ secure_sum_fn = functools.partial(
 # used a plaintext protocol instead
 ```
 
-<!--
 ```python
 xs = ...
 
+# this is just a specification of the protocol we wish
+# to use, and no operations are run as part of its in-
+# stantiation; this allows the object to also be used
+# when e.g. defining computations
 protocol = tfe.protocols.Paillier(
     key_holder=tfe.Player('key_holder'),
     default_device=output_receiver.default_device)
 
-with protocol:
+# create a new session of the protocol; this is what
+# happens behind the scenes if `protocol` was used di-
+# rectly as a context handler; when a keypair is spe-
+# cified then this is used, otherwise a new pair is
+# created on the key holder; different sessions of the
+# same protocol may or may not be compatible: for in-
+# stance, in the case of Paillier it depends on whether
+# the keypairs match, and in Pond on whether the same
+# group of devices was used
+protocol_session = protocol.new_session(
+    # some protocols (such as enclaves and )
+    allowed_computations=None
+)
 
+with protocol_session:
+
+  # if no device is specified (between the session con-
+  # text handler and here) then `encrypt` will try to
+  # determine a device based on information in the type
+  # of `x`; note that inputters do not know what their
+  # values will be used for at this point, yet can still
+  # specify secrecy properties
   cs = [tfe.encrypt(x) for x in xs]
 
-  # compute the aggregation; some protocols are more
-  # picky w.r.t. to the device used, and may complain
-  # when a concrete computation is derived; the pro-
-  # tocol default device is used if left unspecified;
-  # `aggr_fn` is not require to be a tfe.function but
-  # it is supported by tfe.computation
+  # compute the aggregation
   with aggregation_device:
     d = aggr_fn(cs)
 
-  # allow the output receiver to learn the result;
-  # this is checkable at compile-time and runtime
-  # but can be configured to be a runtime no-op
+  # allow the output receiver to learn the result
   d = tfe.allow(d, {output_receiver})
 
-  # decrypt result for output receiver (on its de-
-  # fault device); with the Paillier protocol this
-  # will concretely happen via the key holder, but
-  # masked by the output receiver
-  with output_receiver:
+  # decrypt result for output receiver on its default
+  # device; will check that the output_receiver is
+  # allowed to see the value in plaintext
+  with output_receiver.default_device():
     y = tfe.decrypt(d)
 ```
 
+all runtime players each have a signature keypair registered in a PKI
+
 ```python
-#
-# setup
-#
+from tf_encrypted.protocols import paillier
 
-@tf.function
-def setup_fn():
-  bit_precision = 16
+protocol = tfe.protocols.Paillier(
+    bit_precision=16,
+    key_holder=tfe.Player('key_holder'),
+    default_device=output_receiver.default_device)
 
-  with tfe.Player('key_holder'):
-    keypair = tfe.protocols.paillier.keypair()
+@tfe.concrete_computation
+def new_session():
+  with protocol.key_holder.default_device():
+    keypair = paillier.keypair()
     encryption_key = keypair.encryption_key()
     decryption_key = keypair.decryption_key()
   
-  return encryption_key, decryption_key
+  return PaillierSession(encryption_key, decryption_key)
 
-(encryption_key, decryption_key) = setup_fn()
-
-setup = tfe.integrations.FunctionCall(
-  function=setup_fn,
-
-)
-
-
-
-#
-# aggregation
-#
-
-@tf.function
-def aggregation(bit_precision, encryption_key, xs):
+@tfe.concrete_computation
+def aggregation(session, xs):
 
   cs = []
   for x in xs:
-    with x.player:
-      x = tfe.protocols.paillier.encode(bit_precision, x)
-      c = tfe.protocols.paillier.encrypt(encryption_key, x)
+    with x.player.default_device():
+      x = paillier.encode(protocol.bit_precision, x)
+      c = paillier.encrypt(session.encryption_key, x)
     cs.append(c)
 
   with aggregation_device:
-    d = tfe.protocols.paillier.add_n(encryption_key, cs)
-    d = tfe.protocols.paillier.div(encryption_key, d, len(cs))
+    d = paillier.add_n(session.encryption_key, cs)
+    d = paillier.div(session.encryption_key, d, len(cs))
 
-  with output_receiver:
-      y = tfe.protocols.paillier.decrypt(decryption_key, d)
+  with output_receiver.default_device():
+      y = paillier.decrypt(session.decryption_key, d)
 
   return y
-#
-# execution
-#
 
-bit_precision, _, encryption_key, decryption_key = setup()
 xs = ...
-y = secure_mean(bit_precision, encrytion_key, decryption_key, xs)
-
+paillier_session = new_session()
+y = secure_mean(paillier_session, xs)
 ```
--->
 
 As detailed later, to run secure aggregations the executor first derives concrete computation from the above using the specified protocol, and then uses a bulletin-board network strategy to compile these into a set of program steps and a plan for when and where they should be executed. Each of these steps is essentially a local TensorFlow graph that can be executed by the built-in `EagerExecutor`.
 
@@ -490,11 +525,10 @@ Possible issues that need to be addressed:
 
 -->
 
-### Implementing the Generic Encrypted Executor
+### Implementing the Generic Executor
 
 *(work in progress)*
 
-<!--
 We here give more details on how the custom executor may be implemented. Given (abstract) computations it maps players to known executors and orchestrates TensorFlow computations on them. We concretely focus on `compute_federated_mean`. Note that `create_custom_executor` is responsible for setting up auxiliary executors needed by the encrypted computations when creating the executor stack, and passing these to `CustomExecutor` below.
 
 ```python
@@ -517,7 +551,8 @@ class CustomExecutor(Executor):
     # instantiate protocol; for Paillier this will create a
     # sequence of program steps that generates a new key pair
     # TODO this needs to be scheduled as well
-    protocol = self.protocol_fn()
+    new_session_comp = self.protocol.new_session
+    new_session = self._run_concrete_computation(new_session_comp)
 
     # specify where the aggregation will happen; in this
     # particular case the effect is the same as if we
@@ -525,7 +560,7 @@ class CustomExecutor(Executor):
     aggregation_device = tfe.Device('aggregation_device')
     output_receiver = tfe.Player('output_receiver')
     output_receiver_device = output_receiver.default_device
-    replacements = {
+    device_replacements = {
         aggregation_device: output_receiver_device
     }
 
@@ -535,10 +570,12 @@ class CustomExecutor(Executor):
     # essentially a graph similar to the graphs produces by
     # tf.function but with operations annotated with players,
     # protocols, secrecy requirements, etc.
-    concrete_comp = self._secure_mean_fn(
+    aggregation_comp = self._secure_mean_fn(
         input_signature=input_signature,
         protocol=protocol,
         replacements=replacements)
+
+    self._run_concrete_computation(aggregation_comp, new_session)
 
     # add external executors based on input provided
     # by user along side encrypted computation; con-
@@ -578,8 +615,11 @@ class CustomExecutor(Executor):
             shape=x.shape,
             device=player.default_device(),
             secrecy={player})
-        for x, player in zip(xs, input_players)
+        for x, player in zip(xs, players)
     ]
+
+  def _run_concrete_computation(self, concrete_comp):
+
 
   def _run_execution_plan(self, player_executor_map, plan):
     for step in plan:
@@ -651,7 +691,7 @@ protocol = tfe.protocols.Paillier(
     default_compute_player=server)
 ```
 
--->
+
 
 <!--
 The above specific executors are easy to use but the general strategy makes for a more involved experimentation process. To that end we also propose a programmable executor 
