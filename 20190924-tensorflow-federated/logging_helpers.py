@@ -9,20 +9,19 @@ from tensorflow_federated.python.core.api import computation_types
 from tensorflow_federated.python.core.impl import type_utils
 from tensorflow_federated.python.core.impl.compiler import intrinsic_defs
 from tensorflow_federated.python.core.impl.context_base import Context
-from tensorflow_federated.python.core.impl.context_stack_impl import context_stack
+from tensorflow_federated.python.core.impl.context_stack.context_stack_impl import context_stack
 from tensorflow_federated.python.core.impl.execution_context import ExecutionContext
-from tensorflow_federated.python.core.impl.executor_base import Executor
-from tensorflow_federated.python.core.impl.executor_value_base import ExecutorValue
+from tensorflow_federated.python.core.impl.executors.executor_base import Executor
+from tensorflow_federated.python.core.impl.executors.executor_value_base import ExecutorValue
 
-from tensorflow_federated.python.core.impl.caching_executor import CachingExecutor
+from tensorflow_federated.python.core.impl.executors.caching_executor import CachingExecutor
 from tensorflow_federated.python.core.impl.composite_executor import CompositeExecutor
 from tensorflow_federated.python.core.impl.concurrent_executor import ConcurrentExecutor
-from tensorflow_federated.python.core.impl.eager_executor import EagerExecutor
-from tensorflow_federated.python.core.impl.federated_executor import FederatedExecutor
-from tensorflow_federated.python.core.impl.lambda_executor import LambdaExecutor
+from tensorflow_federated.python.core.impl.executors.eager_executor import EagerExecutor
+from tensorflow_federated.python.core.impl.executors.federated_executor import FederatedExecutor
+from tensorflow_federated.python.core.impl.executors.lambda_executor import LambdaExecutor
 from tensorflow_federated.python.core.impl.remote_executor import RemoteExecutor
-from tensorflow_federated.python.core.impl.transforming_executor import TransformingExecutor
-
+from tensorflow_federated.python.core.impl.executors.transforming_executor import TransformingExecutor
 
 VISIT_RECURSION_STRATEGIES = dict()
 
@@ -252,9 +251,9 @@ register_recursion_strategy(TransformingExecutor, lambda ex: [ex._target_executo
 
 
 for ty in [
-      tff.python.core.impl.federated_executor.FederatedExecutorValue,
-      tff.python.core.impl.lambda_executor.LambdaExecutorValue,
-      tff.python.core.impl.eager_executor.EagerValue,
+      tff.python.core.impl.executors.federated_executor.FederatedExecutor,
+      tff.python.core.impl.executors.lambda_executor.LambdaExecutor,
+      tff.python.core.impl.executors.eager_executor.EagerValue,
   ]:
   register_formatting_strategy(ty, lambda x: "<{} @{} : {}>".format(type(x).__name__, id(x), str(x.type_signature)))
 

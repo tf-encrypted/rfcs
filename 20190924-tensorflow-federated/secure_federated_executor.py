@@ -3,8 +3,8 @@ import tensorflow_federated as tff
 
 from tensorflow_federated.python.core.api import computation_types
 from tensorflow_federated.python.core.impl.compiler import intrinsic_defs
-from tensorflow_federated.python.core.impl.executor_base import Executor
-from tensorflow_federated.python.core.impl.executor_value_base import ExecutorValue
+from tensorflow_federated.python.core.impl.executors.executor_base import Executor
+from tensorflow_federated.python.core.impl.executors.executor_value_base import ExecutorValue
 
 import logging_helpers
 

@@ -1,9 +1,9 @@
 import tensorflow_federated as tff
 
 from tensorflow_federated.python.core import framework
-from tensorflow_federated.python.core.impl.eager_executor import EagerExecutor
-from tensorflow_federated.python.core.impl.federated_executor import FederatedExecutor
-from tensorflow_federated.python.core.impl.lambda_executor import LambdaExecutor
+from tensorflow_federated.python.core.impl.executors.eager_executor import EagerExecutor
+from tensorflow_federated.python.core.impl.executors.federated_executor import FederatedExecutor
+from tensorflow_federated.python.core.impl.executors.lambda_executor import LambdaExecutor
 
 from secure_federated_executor import SecureFederatedExecutor
 
