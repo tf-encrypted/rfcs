@@ -5,10 +5,6 @@ import logging_helpers
 import custom_executor_stacks
 
 
-executor_fn = custom_executor_stacks.builtin_executor_stack(3)
-logging_helpers.set_default_executor(executor_fn)
-
-
 @tff.tf_computation(tf.float32)
 def add_half(x):
   return tf.add(x, 0.5)
@@ -28,8 +24,12 @@ def foo(x):
   y_mean = tff.federated_mean(y_on_clients)
   return y_mean
 
+# executor_fn = custom_executor_stacks.secure_executor_stack(3)
+# executor_fn = tff.framework.create_local_executor(3)
+executor_fn = custom_executor_stacks.builtin_executor_stack(3)
+logging_helpers.set_default_executor(executor_fn)
 
-print(foo(5.0))
+# print(foo(5.0))
 
-# res = add_half_on_clients([1.5, 2.5, 3.5])
-# print(res)
+res = add_half_on_clients([1.5, 2.5, 3.5])
+print(res)
