@@ -103,15 +103,10 @@ from tensorflow_federated.python.core.impl.compiler import FEDERATED_SUM
 
 from tf_encrypted.integrations import federated as tfe_federated
 
-# define symbolic player owning the output of the
-# computation define below; this will later be lin-
-# ked with the server executor
-output_receiver = tfe.Player('output_receiver')
-
 # define encrypted computations for the supported
-# aggregation; these are defined lazily since their
+# aggregations; these are defined lazily since the
 # exact input signature is not known until runtime
-# and may vary between invocations; details later
+# and may vary between invocations; details below
 secure_mean_comp_fn = ...
 secure_sum_comp_fn = ...
 
