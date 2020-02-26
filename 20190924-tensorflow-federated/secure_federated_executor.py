@@ -50,7 +50,7 @@ class SecureFederatedExecutor(Executor):
 
   async def create_tuple(self, elements):
     print("TYPE TYPW TPYE", type(elements))
-    print("ELEMENTS EKECSCDS", elements)  
+    print("ELEMENTS EKECSCDS", elements)
     _elements = elements._value if isinstance(elements, SecureFederatedExecutorValue) else elements
     res = await self._target_executor.create_tuple(_elements)
     return SecureFederatedExecutorValue(res)
