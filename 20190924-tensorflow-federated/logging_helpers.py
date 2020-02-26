@@ -12,6 +12,7 @@ from tensorflow_federated.python.core.impl.context_base import Context
 from tensorflow_federated.python.core.impl.context_stack.context_stack_impl import context_stack
 from tensorflow_federated.python.core.impl.execution_context import ExecutionContext
 from tensorflow_federated.python.core.impl.executors.executor_base import Executor
+from tensorflow_federated.python.core.impl.executors.executor_factory import ExecutorFactoryImpl
 from tensorflow_federated.python.core.impl.executors.executor_value_base import ExecutorValue
 
 from tensorflow_federated.python.core.impl.executors.caching_executor import CachingExecutor
@@ -228,6 +229,7 @@ def monkey_patching_executor_fn(executor_fn):
 def set_default_executor(executor_fn):
   executor_fn = monkey_patching_executor_fn(executor_fn)
   executor_fn = dumping_executor_fn(executor_fn)
+  executor_fn = ExecutorFactoryImpl(executor_fn)
   context = ExecutionContext(executor_fn)
   monkey_patch_context(context)
   context_stack.set_default_context(context)
