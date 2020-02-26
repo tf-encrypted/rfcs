@@ -65,13 +65,13 @@ This can be implemented by either allowing direct links to be established betwee
 
 We propose the following implementation phases:
 
-1. Implement and integrate specific executors and required sub-components such as secure channels;
-2. Implement and integrate generic executor and required sub-components such as compilers;
-3. To the extent possible, re-implement specific executors as instances of the generic executor.
+1. Implement specific server executors and required sub-components such as secure channels.
+2. Implement generic server executor and required compiler infrastructure; to the extent relevant, re-implement specific executors as instances of the generic executor.
+3. Implement generic client executor with the ability to enforce security policies.
 
 Note that especially phase 2 depends on other TFE work around general language and compiler for encrypted computations.
 
-### Phase 1: Specific Executors
+### Phase 1: Specific Server Executors
 
 For the first phase of the integration we propose several specific executors that each implement a fixed secure aggregation protocol. Besides being of practical use, this also allows us to develop the right abstracts and sub-components for the generic executor introduced in the next phase.
 
@@ -113,7 +113,7 @@ This server executor is almost identical to the [trusted executor](#trusted-exec
 
 In addition to secure channels, this work must figure out how to run an executor inside an enclave, perhaps using TF Trusted and TF Lite.
 
-### Phase 2: Generic Executor
+### Phase 2: Generic Server Executor
 
 The specific executors from the first phase are not intended for customization, and their implementation will likely require intimate knowledge of both cryptography and the TFF platform. As such, we do not imagine they represent a viable approach for designing and analyzing secure aggregation protocols. Instead, as a second phase we propose the implementation of a programmable executor parameterized by encrypted computations expressed in the high-level language of TFE.
 
@@ -135,9 +135,11 @@ def secure_aggregation(aggregator, server, aggregation, xs):
 ```python
 # define how we want to run the encrypted computations, in
 # particular which cryptographic scheme we want for each device
+
 aggregator = tfe.DeviceSpec(
     scheme=tfe.schemes.Pond(...)
 )
+
 server = tfe.DeviceSpec(
     scheme=tfe.schemes.Native(...)
 )
@@ -181,6 +183,10 @@ all runtime players each have a signature keypair registered in a PKI
 
 
 As detailed later, to run secure aggregations the executor first derives concrete computation from the above using the specified protocol, and then uses a bulletin-board network strategy to compile these into a set of program steps and a plan for when and where they should be executed. Each of these steps is essentially a local TensorFlow graph that can be executed by the built-in `EagerExecutor`.
+
+### Phase 3: Client Executor
+
+*(work in progress)*
 
 ## Detailed Design Proposal
 
