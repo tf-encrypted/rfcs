@@ -499,3 +499,5 @@ class CustomExecutor(Executor):
 -->
 
 ## Questions and Discussion Topics
+
+- Alternative way of running (partitioned) encrypted computations on server and clients, i.e. instead of embedding them inside TensorFlow graphs via custom ops? The current directions pointed to by MLIR suggests that this might not be a far stretch. 
