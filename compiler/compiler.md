@@ -12,3 +12,5 @@
   - [GraphDef to MLIR dialect](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/compiler/mlir/tensorflow/translate)
   - [TF Graph transformations moved to MLIR](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/compiler/mlir/tensorflow/transforms)
 - [Cross-language optimizations between Rust and C++ via LLVM](http://blog.llvm.org/2019/09/closing-gap-cross-language-lto-between.html)
+- [Swift4TF Design Overview](https://github.com/tensorflow/swift/blob/master/docs/DesignOverview.md)
+- [Swift4TF interop with TF](https://github.com/tensorflow/swift/blob/master/docs/GraphProgramExtraction.md)
