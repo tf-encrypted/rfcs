@@ -18,6 +18,8 @@ Both the Python eDSL and the target computation graphs follow a functional parad
 
 - immutable data is easier to (statically) analyse and values can safely be reused for optimization
 
+- inspiration from by TF2, TFF, TF Mesh, MLIR, Swift4TF, JAX
+
 ### Tracing
 
 - abstract computations (tfe.computation) is polymorphic, like tf.function
