@@ -58,6 +58,9 @@ class SecureFederatedExecutor(Executor):
   async def create_selection(self, source, index=None, name=None):
     return await self._target_executor.create_selection(source, index=index, name=name)
 
+  def close(self):
+    self._target_executor.close()
+
 
 logging_helpers.register_recursion_strategy(SecureFederatedExecutor,
     lambda ex: [ex._target_executor])
