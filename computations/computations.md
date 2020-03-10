@@ -37,7 +37,9 @@
 - values have a classification which may be enforced both at compile- and run-time
 - devices must prove player ownership (via identity signature)
 - computations may reference external values (eg models weights) and functionality (eg functions and data connectors)
-
+- computations are finally partitioned into set of `ProtocolStep` objects, which could either be compiled/executed directly via MLIR or lowered to TF graphs with custom ops
+  - current approach: ship primitives (but also eg paillier encryption) to the clients as TF custom ops; ship protocol steps as TF graphs using these custom ops
+  - alternative: ship primitives as library or linked into the executor; ship protocol steps as higher level object that will be linked with the library via MLIR and LLVM
 
 - a computation is submitted to run in a union/setup, is it *not* launched by a single device; this means that device annotations are simply used to specify some of the players involved
 - a driver may choose to create some devices at runtime (eg EnclaveDevice)
