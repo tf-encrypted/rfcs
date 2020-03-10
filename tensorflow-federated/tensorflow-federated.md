@@ -4,7 +4,7 @@
 :-------------- |:----------------------------------------------------
 | **Author(s)** | Morten Dahl |
 | **Sponsor**   | |
-| **Updated**   | 2020-02-26 |
+| **Updated**   | 2020-03-10 |
 
 ## Objective
 
@@ -24,42 +24,62 @@ The design and analysis of such protocols require expertise and tools that are m
 
 ## Design Proposal
 
-This design introduces server executors similar to the built-in `FederatedExecutor` but implementing secure versions of the supported intrinsic functions such as `tff.federated_secure_sum`, `tff.federated_sum`, and `tff.federated_mean`. As such, the specific secure aggregation protocol remains opaque from the perspective of the TFF glue language, and in the latter cases even that secure aggregation is used at all.
+This design introduces server executors similar to the built-in `FederatedExecutor` but implementing encrypted versions of the supported intrinsic functions such as `tff.federated_secure_sum`, `tff.federated_sum`, and `tff.federated_mean`. In the former case the specific secure aggregation protocol remains opaque from the perspective of the TFF glue language, and in the latter cases it remains opaque that secure aggregation is even used at all.
 
 ```python
 # import integration module from TFE
 from tf_encrypted.integrations import federated as tfe_integration
 
-# define federated algorithm using TFF glue language
+# create secure executor stack
+executor_fn = tfe_integration.create_secure_executor(protocol='bik+17', ...)
+tff.framework.set_default_executor(executor_fn)
+
+# develop federated algorithm using TFF glue language
 @tff.federated_computation
 def my_computation(xs):
   return tff.federated_secure_sum(xs)
-
-# create secure executor stack and set as default
-executor_fn = tfe_integration.create_secure_executor(protocol='bik+17', ...)
-tff.framework.set_default_executor(executor_fn)
 
 # evaluate computations in the normal way
 my_computation([1., 2., 3., 4., 5.]))
 ```
 
-We assume a one-time installation of TFE on all involved parties, including clients. Beyond that, clients use the built-in executors, thus requiring no code changes between experiments and as part of deployment. Future work aim to improve upon this by also adding client support for enforcing security policies and trusted setup (e.g. PKI); until this is done we can only offer honest-but-curious security.
+In [phase 1](#phase-1-specific-server-executors) users can choose between a fixed set of protocols as illustrated above. In [phase 2](#phase-2-generic-server-executor) we open up for custom protocols using the TFE glue language as shown below.
+
+```python
+# develop encrypted computation using TFE glue language
+@tfe.computation
+def my_secure_mean(xs):
+  cs = [tfe.classify(x, {x.owner}) for x in xs]
+
+  with aggregation_device:
+    d = tfe.add_n(cs) / len(cs)
+    e = tfe.classify(d, {server_device.owner})
+
+  with server_device:
+    y = tfe.declassify(e)
+
+  return y
+
+# create executor based on the encrypted computation
+executor_fn = tfe_federated.create_secure_executor(federated_mean=my_secure_mean, ...)
+tff.framework.set_default_executor(executor_fn)
+```
+
+### Local Execution
+
+We assume a one-time installation of TFE on all involved parties, and embed all cryptographic operations into TensorFlow computations. This allows clients to use the built-in `EagerExecutor`.
+
+In the future we will evaluate alternatives to this approach, and e.g. allow a higher-level representation of encrypted computations to be shared with the clients. Options might be to wrap or extend [the format of TFF computations](https://github.com/tensorflow/federated/tree/v0.12.0/tensorflow_federated/proto/v0/computation.proto#L92-L174) and adapt both client and server executors accordingly. This could allow clients to enforce individual security policies and to move away from a honest-but-curious security model for the server. It may also remove the need for exposing all cryptographic operations as TensorFlow custom ops, potentially making secure aggregation available on more platforms.
+
+Note that there is some uncertainty here due to the unknown direction of both TFF and TF. In particular, the TF runtime seems to be undergoing changes, and the closed-source version of TFF may already have a suitable design in place.
 
 ### Communication Channels
 
-Indirect secure channels
+Cryptographic protocols typically require different communication patterns than those otherwise used in TFF (e.g. `tff.federated_broadcast` and `tff.federated_collect`). In particular, it is often required that one party must send a authenticated and/or confidential message to a specific other party.
 
-Cryptographic protocols typically require different communication patterns than those otherwise used in TFF (e.g. `tff.federated_broadcast` and `tff.federated_collect`). In particular, it is often required that one party must send a authenticated and/or confidential message to a specific other party. Although this may change in the future, for this proposal we focus solely on implementing these communication patterns by sending all messages through the server; in cryptographic protocol theory this is known as the bulletin board model.
+In the current proposal we only focus on supporting these pattern by sending all messages (encrypted) through the server, which is a realistic choice in some cross-device FL applications. We use [libsodium](https://github.com/jedisct1/libsodium) primitives exposed through TFE to implement such *indirect* authenticated or secure channels (in contrast to the direct channels implemented by e.g. gRPC over mTLS).
 
-in the bulletin board it is not enough to have secure direct channels (eg gRPC over mTLS): we need something that can be embedded.
-
-authenticated or secure (encrypted) channels between some of the participants are typically required, allowing one party to send an authenticated or confidential message to another.
-
-This can be implemented by either allowing direct links to be established between executors or by routing all messages through a so-called bulletin board (public database) operated e.g. by the server. The former can be implemented securely using e.g. TLS and the latter without any changes to the client executors using [libsodium](https://github.com/jedisct1/libsodium) primitives exposed through TFE.
-
-- How are ground truth about identities defined and distributed?
-
-- What are alternatives for direct connections for high-performance use cases? out of scope!
+A future proposal may consider alternatives, especially with respect to efficiency in cross-silo FL applications.
 
 ### Roadmap
 
@@ -73,7 +93,7 @@ Note that especially phase 2 depends on other TFE work around general language a
 
 ### Phase 1: Specific Server Executors
 
-For the first phase of the integration we propose several specific executors that each implement a fixed secure aggregation protocol. Besides being of practical use, this also allows us to develop the right abstracts and sub-components for the generic executor introduced in the next phase.
+For the first phase of the integration we propose several specific executors that each implement a fixed secure aggregation protocol. Besides being of practical use, this also allows us to develop the right abstractions and sub-components for the generic executor introduced in the next phase.
 
 #### Trusted Executor
 
@@ -97,15 +117,15 @@ This executor is particularly useful in a cross-silo setting, where the set of p
 
 In addition to secure channels, this work depends only on a small extension of the secure randomness primitives available in TFE.
 
+#### BIK+'17 Executor
+
+This server executor implements [Google's secure sum protocol](https://eprint.iacr.org/2017/281) optimized for volatile clients. Although a highly relevant protocol, it is also not clear at this point whether TFF will ship with an built-in implementation in the near future.
+
 #### DPP'17 Executor
 
 This server executor implements the [SDA secure sum protocol](https://eprint.iacr.org/2017/643) optimized for volatile clients.
 
 It depends on primitives for both Paillier and Shamir (packed) secret sharing.
-
-#### BIK+'17 Executor (Optional)
-
-This server executor implements [Google's secure sum protocol](https://eprint.iacr.org/2017/281) optimized for volatile clients. Although a highly relevant protocol, it is also not clear at this point whether TFF will ship with an built-in implementation in the near future.
 
 #### Enclave Executor (Optional)
 
@@ -119,14 +139,14 @@ The specific executors from the first phase are not intended for customization, 
 
 ```python
 @tfe.computation
-def secure_aggregation(aggregator, server, aggregation, xs):
+def secure_aggregation(aggregation_device, server_device, aggregation_fn, xs):
   cs = [tfe.classify(x, {x.owner}) for x in xs]
 
-  with aggregator:
-    d = aggregation(cs)
-    e = tfe.classify(d, {server.owner})
+  with aggregation_device:
+    d = aggregation_fn(cs)
+    e = tfe.classify(d, {server_device.owner})
 
-  with server:
+  with server_device:
     y = tfe.declassify(e)
 
   return y
@@ -136,11 +156,11 @@ def secure_aggregation(aggregator, server, aggregation, xs):
 # define how we want to run the encrypted computations, in
 # particular which cryptographic scheme we want for each device
 
-aggregator = tfe.DeviceSpec(
+aggregation_device = tfe.DeviceSpec(
     scheme=tfe.schemes.Pond(...)
 )
 
-server = tfe.DeviceSpec(
+server_device = tfe.DeviceSpec(
     scheme=tfe.schemes.Native(...)
 )
 
@@ -149,15 +169,15 @@ server = tfe.DeviceSpec(
 
 secure_mean_comp_fn = functools.partial(
     secure_aggregation.get_concrete_computation,
-    aggregator=aggregator,
-    server=server,
+    aggregation_device=aggregation_device,
+    server_device=server_device,
     aggregation_fn=lambda xs: tfe.add_n(xs) / len(xs),
 )
 
 secure_sum_comp_fn = functools.partial(
     secure_aggregation.get_concrete_computation,
-    aggregator=aggregator,
-    server=server,
+    aggregation_device=aggregation_device,
+    server_device=server_device,
     aggregation_fn=lambda xs: tfe.add_n(xs),
 )
 ```
@@ -178,11 +198,6 @@ tff.framework.set_default_executor(executor_fn)
 ```
 
 The goal here is not necessarily to capture all possible secure aggregation protocols nor scenarios, and we may likely encounter protocols outside its scope; for this reason it may still be relevant to maintain the special executors from phase 1.
-
-all runtime players each have a signature keypair registered in a PKI
-
-
-As detailed later, to run secure aggregations the executor first derives concrete computation from the above using the specified protocol, and then uses a bulletin-board network strategy to compile these into a set of program steps and a plan for when and where they should be executed. Each of these steps is essentially a local TensorFlow graph that can be executed by the built-in `EagerExecutor`.
 
 ### Phase 3: Client Executor
 
@@ -500,4 +515,4 @@ class CustomExecutor(Executor):
 
 ## Questions and Discussion Topics
 
-- Alternative way of running (partitioned) encrypted computations on server and clients, i.e. instead of embedding them inside TensorFlow graphs via custom ops? The current directions pointed to by MLIR suggests that this might not be a far stretch. 
+- How are ground truth about identities defined and distributed?
