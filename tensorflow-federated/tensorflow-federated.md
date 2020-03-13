@@ -24,7 +24,7 @@ The design and analysis of such protocols require expertise and tools that are m
 
 ## Design Proposal
 
-This design introduces server executors similar to the built-in `FederatedExecutor` but implementing encrypted versions of the supported intrinsic functions such as `tff.federated_secure_sum`, `tff.federated_sum`, and `tff.federated_mean`. In the former case the specific secure aggregation protocol remains opaque from the perspective of the TFF glue language, and in the latter cases it remains opaque that secure aggregation is even used at all.
+This design introduces server executors similar to the built-in `FederatingExecutor` but implementing encrypted versions of the supported intrinsic functions such as `tff.federated_secure_sum`, `tff.federated_sum`, and `tff.federated_mean`. In the former case the specific secure aggregation protocol remains opaque from the perspective of the TFF glue language, and in the latter cases it remains opaque that secure aggregation is even used at all.
 
 ```python
 # import integration module from TFE
@@ -67,7 +67,7 @@ tff.framework.set_default_executor(executor_fn)
 
 ### Local Execution
 
-We assume a one-time installation of TFE on all involved parties, and embed all cryptographic operations into TensorFlow computations. This allows clients to use the built-in `EagerExecutor`.
+We assume a one-time installation of TFE on all involved parties, and embed all protocol steps (and cryptographic operations) into TensorFlow computations. This allows clients to use the built-in `EagerTFExecutor`.
 
 In the future we will evaluate alternatives to this approach, and e.g. allow a higher-level representation of encrypted computations to be shared with the clients. Options might be to wrap or extend [the format of TFF computations](https://github.com/tensorflow/federated/tree/v0.12.0/tensorflow_federated/proto/v0/computation.proto#L92-L174) and adapt both client and server executors accordingly. This could allow clients to enforce individual security policies and to move away from a honest-but-curious security model for the server. It may also remove the need for exposing all cryptographic operations as TensorFlow custom ops, potentially making secure aggregation available on more platforms.
 
@@ -516,3 +516,5 @@ class CustomExecutor(Executor):
 ## Questions and Discussion Topics
 
 - How are ground truth about identities defined and distributed?
+
+- Should we introduce a custom client executor that maintains an ACL
