@@ -1,6 +1,6 @@
 # Computations
 
-| Status        | Proposed                                             |
+| Status        | WIP                                                  |
 :-------------- |:---------------------------------------------------- |
 | **Author(s)** | Morten Dahl (mortendahlcs@gmail.com)                 |
 | **Sponsor**   |                                                      |
