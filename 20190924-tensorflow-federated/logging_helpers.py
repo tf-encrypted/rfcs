@@ -8,20 +8,21 @@ from tensorflow.python.framework.ops import EagerTensor as tf_EagerTensor
 from tensorflow_federated.python.core.api import computation_types
 from tensorflow_federated.python.core.impl import type_utils
 from tensorflow_federated.python.core.impl.compiler import intrinsic_defs
-from tensorflow_federated.python.core.impl.context_base import Context
+from tensorflow_federated.python.core.impl.context_stack.context_base import Context
 from tensorflow_federated.python.core.impl.context_stack.context_stack_impl import context_stack
-from tensorflow_federated.python.core.impl.execution_context import ExecutionContext
+from tensorflow_federated.python.core.impl.executors.execution_context import ExecutionContext
+from tensorflow_federated.python.core.impl.executors.execution_context import ExecutionContextValue
 from tensorflow_federated.python.core.impl.executors.executor_base import Executor
 from tensorflow_federated.python.core.impl.executors.executor_factory import ExecutorFactoryImpl
 from tensorflow_federated.python.core.impl.executors.executor_value_base import ExecutorValue
 
 from tensorflow_federated.python.core.impl.executors.caching_executor import CachingExecutor
-from tensorflow_federated.python.core.impl.composite_executor import CompositeExecutor
-from tensorflow_federated.python.core.impl.concurrent_executor import ConcurrentExecutor
-from tensorflow_federated.python.core.impl.executors.eager_executor import EagerExecutor
-from tensorflow_federated.python.core.impl.executors.federated_executor import FederatedExecutor
-from tensorflow_federated.python.core.impl.executors.lambda_executor import LambdaExecutor
-from tensorflow_federated.python.core.impl.remote_executor import RemoteExecutor
+from tensorflow_federated.python.core.impl.executors.composing_executor import ComposingExecutor
+from tensorflow_federated.python.core.impl.executors.thread_delegating_executor import ThreadDelegatingExecutor
+from tensorflow_federated.python.core.impl.executors.eager_tf_executor import EagerTFExecutor
+from tensorflow_federated.python.core.impl.executors.federating_executor import FederatingExecutor
+from tensorflow_federated.python.core.impl.executors.reference_resolving_executor import ReferenceResolvingExecutor
+from tensorflow_federated.python.core.impl.executors.remote_executor import RemoteExecutor
 from tensorflow_federated.python.core.impl.executors.transforming_executor import TransformingExecutor
 
 VISIT_RECURSION_STRATEGIES = dict()
@@ -240,22 +241,25 @@ def set_default_executor(executor_fn):
 #
 
 register_recursion_strategy(CachingExecutor, lambda ex: [ex._target_executor])
-register_recursion_strategy(CompositeExecutor, lambda ex: [ex._parent_executor] + ex._child_executors)
-register_recursion_strategy(ConcurrentExecutor, lambda ex: [ex._target_executor])
-register_recursion_strategy(EagerExecutor, lambda _: [])
-register_recursion_strategy(FederatedExecutor,
+register_recursion_strategy(ComposingExecutor, lambda ex: [ex._parent_executor] + ex._child_executors)
+register_recursion_strategy(ThreadDelegatingExecutor, lambda ex: [ex._target_executor])
+register_recursion_strategy(EagerTFExecutor, lambda _: [])
+register_recursion_strategy(FederatingExecutor,
     lambda ex: ex._target_executors[None] \
              + ex._target_executors[tff.SERVER] \
              + ex._target_executors[tff.CLIENTS])
-register_recursion_strategy(LambdaExecutor, lambda ex: [ex._target_executor])
+register_recursion_strategy(ReferenceResolvingExecutor, lambda ex: [ex._target_executor])
 register_recursion_strategy(RemoteExecutor, lambda _: [])
 register_recursion_strategy(TransformingExecutor, lambda ex: [ex._target_executor])
 
 
 for ty in [
-      tff.python.core.impl.executors.federated_executor.FederatedExecutor,
-      tff.python.core.impl.executors.lambda_executor.LambdaExecutor,
-      tff.python.core.impl.executors.eager_executor.EagerValue,
+      tff.python.core.impl.executors.federating_executor.FederatingExecutor,
+      tff.python.core.impl.executors.federating_executor.FederatingExecutorValue,
+      tff.python.core.impl.executors.reference_resolving_executor.ReferenceResolvingExecutor,
+      tff.python.core.impl.executors.reference_resolving_executor.ReferenceResolvingExecutorValue,
+      tff.python.core.impl.executors.execution_context.ExecutionContextValue,
+      tff.python.core.impl.executors.eager_tf_executor.EagerValue,
   ]:
   register_formatting_strategy(ty, lambda x: "<{} @{} : {}>".format(type(x).__name__, id(x), str(x.type_signature)))
 
