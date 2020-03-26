@@ -288,4 +288,13 @@ register_formatting_strategy(tff.proto.v0.computation_pb2.Computation,
     lambda x: "<ComputationPb {} @{} : {}>".format(x.WhichOneof('computation'), id(x), x.type.WhichOneof('type')))
 
 register_formatting_strategy(tff.python.common_libs.anonymous_tuple.AnonymousTuple,
-    lambda x: "<anonymous tuple @{}>".format(id(x)))
+    lambda x: "<AnonymousTuple @{} : {}>".format(id(x), format_anon_tuple(x)))
+
+def format_anon_tuple(tup):
+  names = tup._name_array
+  values = tup._element_array
+  fmt_strs = []
+  for n, v in zip(names, values):
+    fmt_strs.append("{}: {}".format(n, format_object(v)))
+
+  return "({})".format(", ".join(fmt_strs))
