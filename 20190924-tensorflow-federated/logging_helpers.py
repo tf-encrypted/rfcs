@@ -50,7 +50,7 @@ def visit_executor_stack(visitor, executor_stack):
   visitor.visit_after(executor_stack)
 
 
-DEFAULT_STRATEGY = lambda x: "{} {}".format(type(x), x)
+DEFAULT_STRATEGY = lambda x: "{} {}".format(x, type(x))
 FORMATTING_STRATEGIES = dict()
 
 
@@ -109,7 +109,7 @@ def monkey_patch_executor(executor):
     )
 
   async def create_value(value, type_spec=None):
-    print(prefix(executor), "create_value call", format_object(value), ",", format_object(type_spec))
+    print(prefix(executor), "create_value call", format_object(value), ";", format_object(type_spec))
     global _CURRENT_CALL_LEVEL
     _CURRENT_CALL_LEVEL += 1
     res = await executor._real_create_value(value, type_spec=type_spec)
@@ -121,7 +121,7 @@ def monkey_patch_executor(executor):
   executor.create_value = create_value
 
   async def create_call(comp, arg=None):
-    print(prefix(executor), "create_call call", format_object(comp), ",", format_object(arg))
+    print(prefix(executor), "create_call call", format_object(comp), ";", format_object(arg))
     global _CURRENT_CALL_LEVEL
     _CURRENT_CALL_LEVEL += 1
     res = await executor._real_create_call(comp, arg)
@@ -142,9 +142,9 @@ def monkey_patch_executor(executor):
   executor.create_tuple = create_tuple
 
   async def create_selection(source, index=None, name=None):
-    print(prefix(executor), "create_selection call")
+    print(prefix(executor), "create_selection call", format_object(index), format_object(name))
     res = await executor._real_create_selection(source, index=index, name=name)
-    print(prefix(executor), "create_selection retr", res)
+    print(prefix(executor), "create_selection retr", format_object(res))
     return res
 
   executor._real_create_selection = executor.create_selection
@@ -175,18 +175,18 @@ def monkey_patch_context(context):
     )
 
   def ingest(val, type_spec):
-    print(prefix(context), "ingest call", val, type_spec)
+    print(prefix(context), "ingest call", format_object(val), format_object(type_spec))
     res = context._real_ingest(val, type_spec)
-    print(prefix(context), "ingest retr", res)
+    print(prefix(context), "ingest retr", format_object(res))
     return res
 
   context._real_ingest = context.ingest
   context.ingest = ingest
 
   def invoke(comp, arg):
-    print(prefix(context), "invoke call", comp, arg)
+    print(prefix(context), "invoke call", format_object(comp), format_object(arg))
     res = context._real_invoke(comp, arg)
-    print(prefix(context), "invoke retr", res)
+    print(prefix(context), "invoke retr", format_object(res))
     return res
 
   context._real_invoke = context.invoke
@@ -272,18 +272,20 @@ for ty in [
 
 register_formatting_strategy(float, lambda x: "<{} : float>".format(x))
 register_formatting_strategy(type(None), lambda _: "-")
+register_formatting_strategy(list, lambda x: [format_object(xi) for xi in x])
+register_formatting_strategy(tuple, lambda x: tuple(format_object(xi) for xi in x))
 
 register_formatting_strategy(tf_EagerTensor,
     lambda x: "<{} @{}>".format(type(x).__name__, id(x)))
 
 register_formatting_strategy(tff.python.core.impl.compiler.intrinsic_defs.IntrinsicDef,
-    lambda x: "<intrinsic-def {} {} @{}>".format(x.uri, x.type_signature, id(x)))
+    lambda x: "<IntrinsicDef {} {} @{}>".format(x.uri, x.type_signature, id(x)))
 
 register_formatting_strategy(tff.python.core.impl.computation_impl.ComputationImpl,
-    lambda x: "<computation-impl {} @{} : {}>".format(x._computation_proto.WhichOneof('computation'), id(x), x.type_signature))
+    lambda x: "<ComputationImpl {} @{} : {}>".format(x._computation_proto.WhichOneof('computation'), id(x), x.type_signature))
 
 register_formatting_strategy(tff.proto.v0.computation_pb2.Computation,
-    lambda x: "<computation-pb {} @{} : {}>".format(x.WhichOneof('computation'), id(x), x.type.WhichOneof('type')))
+    lambda x: "<ComputationPb {} @{} : {}>".format(x.WhichOneof('computation'), id(x), x.type.WhichOneof('type')))
 
 register_formatting_strategy(tff.python.common_libs.anonymous_tuple.AnonymousTuple,
     lambda x: "<anonymous tuple @{}>".format(id(x)))
