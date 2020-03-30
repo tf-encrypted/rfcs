@@ -8,20 +8,21 @@ from tensorflow.python.framework.ops import EagerTensor as tf_EagerTensor
 from tensorflow_federated.python.core.api import computation_types
 from tensorflow_federated.python.core.impl import type_utils
 from tensorflow_federated.python.core.impl.compiler import intrinsic_defs
-from tensorflow_federated.python.core.impl.context_base import Context
+from tensorflow_federated.python.core.impl.context_stack.context_base import Context
 from tensorflow_federated.python.core.impl.context_stack.context_stack_impl import context_stack
-from tensorflow_federated.python.core.impl.execution_context import ExecutionContext
+from tensorflow_federated.python.core.impl.executors.execution_context import ExecutionContext
+from tensorflow_federated.python.core.impl.executors.execution_context import ExecutionContextValue
 from tensorflow_federated.python.core.impl.executors.executor_base import Executor
 from tensorflow_federated.python.core.impl.executors.executor_factory import ExecutorFactoryImpl
 from tensorflow_federated.python.core.impl.executors.executor_value_base import ExecutorValue
 
 from tensorflow_federated.python.core.impl.executors.caching_executor import CachingExecutor
-from tensorflow_federated.python.core.impl.composite_executor import CompositeExecutor
-from tensorflow_federated.python.core.impl.concurrent_executor import ConcurrentExecutor
-from tensorflow_federated.python.core.impl.executors.eager_executor import EagerExecutor
-from tensorflow_federated.python.core.impl.executors.federated_executor import FederatedExecutor
-from tensorflow_federated.python.core.impl.executors.lambda_executor import LambdaExecutor
-from tensorflow_federated.python.core.impl.remote_executor import RemoteExecutor
+from tensorflow_federated.python.core.impl.executors.composing_executor import ComposingExecutor
+from tensorflow_federated.python.core.impl.executors.thread_delegating_executor import ThreadDelegatingExecutor
+from tensorflow_federated.python.core.impl.executors.eager_tf_executor import EagerTFExecutor
+from tensorflow_federated.python.core.impl.executors.federating_executor import FederatingExecutor
+from tensorflow_federated.python.core.impl.executors.reference_resolving_executor import ReferenceResolvingExecutor
+from tensorflow_federated.python.core.impl.executors.remote_executor import RemoteExecutor
 from tensorflow_federated.python.core.impl.executors.transforming_executor import TransformingExecutor
 
 VISIT_RECURSION_STRATEGIES = dict()
@@ -49,7 +50,7 @@ def visit_executor_stack(visitor, executor_stack):
   visitor.visit_after(executor_stack)
 
 
-DEFAULT_STRATEGY = lambda x: "{} {}".format(type(x), x)
+DEFAULT_STRATEGY = lambda x: "{} {}".format(x, type(x))
 FORMATTING_STRATEGIES = dict()
 
 
@@ -108,7 +109,7 @@ def monkey_patch_executor(executor):
     )
 
   async def create_value(value, type_spec=None):
-    print(prefix(executor), "create_value call", format_object(value), ",", format_object(type_spec))
+    print(prefix(executor), "create_value call", format_object(value), ";", format_object(type_spec))
     global _CURRENT_CALL_LEVEL
     _CURRENT_CALL_LEVEL += 1
     res = await executor._real_create_value(value, type_spec=type_spec)
@@ -120,7 +121,7 @@ def monkey_patch_executor(executor):
   executor.create_value = create_value
 
   async def create_call(comp, arg=None):
-    print(prefix(executor), "create_call call", format_object(comp), ",", format_object(arg))
+    print(prefix(executor), "create_call call", format_object(comp), ";", format_object(arg))
     global _CURRENT_CALL_LEVEL
     _CURRENT_CALL_LEVEL += 1
     res = await executor._real_create_call(comp, arg)
@@ -141,9 +142,9 @@ def monkey_patch_executor(executor):
   executor.create_tuple = create_tuple
 
   async def create_selection(source, index=None, name=None):
-    print(prefix(executor), "create_selection call")
+    print(prefix(executor), "create_selection call", format_object(index), format_object(name))
     res = await executor._real_create_selection(source, index=index, name=name)
-    print(prefix(executor), "create_selection retr", res)
+    print(prefix(executor), "create_selection retr", format_object(res))
     return res
 
   executor._real_create_selection = executor.create_selection
@@ -174,18 +175,18 @@ def monkey_patch_context(context):
     )
 
   def ingest(val, type_spec):
-    print(prefix(context), "ingest call", val, type_spec)
+    print(prefix(context), "ingest call", format_object(val), format_object(type_spec))
     res = context._real_ingest(val, type_spec)
-    print(prefix(context), "ingest retr", res)
+    print(prefix(context), "ingest retr", format_object(res))
     return res
 
   context._real_ingest = context.ingest
   context.ingest = ingest
 
   def invoke(comp, arg):
-    print(prefix(context), "invoke call", comp, arg)
+    print(prefix(context), "invoke call", format_object(comp), format_object(arg))
     res = context._real_invoke(comp, arg)
-    print(prefix(context), "invoke retr", res)
+    print(prefix(context), "invoke retr", format_object(res))
     return res
 
   context._real_invoke = context.invoke
@@ -240,22 +241,25 @@ def set_default_executor(executor_fn):
 #
 
 register_recursion_strategy(CachingExecutor, lambda ex: [ex._target_executor])
-register_recursion_strategy(CompositeExecutor, lambda ex: [ex._parent_executor] + ex._child_executors)
-register_recursion_strategy(ConcurrentExecutor, lambda ex: [ex._target_executor])
-register_recursion_strategy(EagerExecutor, lambda _: [])
-register_recursion_strategy(FederatedExecutor,
+register_recursion_strategy(ComposingExecutor, lambda ex: [ex._parent_executor] + ex._child_executors)
+register_recursion_strategy(ThreadDelegatingExecutor, lambda ex: [ex._target_executor])
+register_recursion_strategy(EagerTFExecutor, lambda _: [])
+register_recursion_strategy(FederatingExecutor,
     lambda ex: ex._target_executors[None] \
              + ex._target_executors[tff.SERVER] \
              + ex._target_executors[tff.CLIENTS])
-register_recursion_strategy(LambdaExecutor, lambda ex: [ex._target_executor])
+register_recursion_strategy(ReferenceResolvingExecutor, lambda ex: [ex._target_executor])
 register_recursion_strategy(RemoteExecutor, lambda _: [])
 register_recursion_strategy(TransformingExecutor, lambda ex: [ex._target_executor])
 
 
 for ty in [
-      tff.python.core.impl.executors.federated_executor.FederatedExecutor,
-      tff.python.core.impl.executors.lambda_executor.LambdaExecutor,
-      tff.python.core.impl.executors.eager_executor.EagerValue,
+      tff.python.core.impl.executors.federating_executor.FederatingExecutor,
+      tff.python.core.impl.executors.federating_executor.FederatingExecutorValue,
+      tff.python.core.impl.executors.reference_resolving_executor.ReferenceResolvingExecutor,
+      tff.python.core.impl.executors.reference_resolving_executor.ReferenceResolvingExecutorValue,
+      tff.python.core.impl.executors.execution_context.ExecutionContextValue,
+      tff.python.core.impl.executors.eager_tf_executor.EagerValue,
   ]:
   register_formatting_strategy(ty, lambda x: "<{} @{} : {}>".format(type(x).__name__, id(x), str(x.type_signature)))
 
@@ -268,18 +272,29 @@ for ty in [
 
 register_formatting_strategy(float, lambda x: "<{} : float>".format(x))
 register_formatting_strategy(type(None), lambda _: "-")
+register_formatting_strategy(list, lambda x: [format_object(xi) for xi in x])
+register_formatting_strategy(tuple, lambda x: tuple(format_object(xi) for xi in x))
 
 register_formatting_strategy(tf_EagerTensor,
     lambda x: "<{} @{}>".format(type(x).__name__, id(x)))
 
 register_formatting_strategy(tff.python.core.impl.compiler.intrinsic_defs.IntrinsicDef,
-    lambda x: "<intrinsic-def {} {} @{}>".format(x.uri, x.type_signature, id(x)))
+    lambda x: "<IntrinsicDef {} {} @{}>".format(x.uri, x.type_signature, id(x)))
 
 register_formatting_strategy(tff.python.core.impl.computation_impl.ComputationImpl,
-    lambda x: "<computation-impl {} @{} : {}>".format(x._computation_proto.WhichOneof('computation'), id(x), x.type_signature))
+    lambda x: "<ComputationImpl {} @{} : {}>".format(x._computation_proto.WhichOneof('computation'), id(x), x.type_signature))
 
 register_formatting_strategy(tff.proto.v0.computation_pb2.Computation,
-    lambda x: "<computation-pb {} @{} : {}>".format(x.WhichOneof('computation'), id(x), x.type.WhichOneof('type')))
+    lambda x: "<ComputationPb {} @{} : {}>".format(x.WhichOneof('computation'), id(x), x.type.WhichOneof('type')))
 
 register_formatting_strategy(tff.python.common_libs.anonymous_tuple.AnonymousTuple,
-    lambda x: "<anonymous tuple @{}>".format(id(x)))
+    lambda x: "<AnonymousTuple @{} : {}>".format(id(x), format_anon_tuple(x)))
+
+def format_anon_tuple(tup):
+  names = tup._name_array
+  values = tup._element_array
+  fmt_strs = []
+  for n, v in zip(names, values):
+    fmt_strs.append("{}: {}".format(n, format_object(v)))
+
+  return "({})".format(", ".join(fmt_strs))

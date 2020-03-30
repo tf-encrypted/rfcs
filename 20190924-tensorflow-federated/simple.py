@@ -32,4 +32,5 @@ logging_helpers.set_default_executor(executor_fn)
 # print(foo(5.0))
 
 res = add_half_on_clients([1.5, 2.5, 3.5])
+# res = foo(5.)
 print(res)
